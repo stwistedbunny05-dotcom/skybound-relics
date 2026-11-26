@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/png" href="./icon-192.png" />
+  <title>SKYBOUND RELICS</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      overflow: hidden; background: #1e293b;
+      font-family: 'Courier New', Consolas, monospace;
+      color: #f8fafc;
+      touch-action: none;
+    }
+    #gameCanvas {
+      width: 100%; height: 100%; display: block;
+    }
+    #gameCanvas.retro-pixels {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    .pixel-box {
+      background: rgba(15, 23, 42, 0.88);
+      border: 3px solid #e2e8f0;
+      box-shadow: 4px 4px 0 #020617;
+    }
+
+    /* Clean Icon-Driven RPG HUD */
+    .hud-top {
+      position: fixed; top: 10px; left: 10px; right: 10px;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px;
+      pointer-events: none; z-index: 10;
+    }
+    .hud-group {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+      pointer-events: auto;
+    }
+    .stat-pill {
+      padding: 4px 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.4px;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .gold { color: #facc15; }
+    .cyan { color: #67e8f9; }
+    .green { color: #34d399; }
+    #heartsDisplay { font-size: 15px; letter-spacing: 2px; line-height: 1; }
+    button.ctrl-btn {
+      font-family: inherit; font-size: 11px; font-weight: 700;
+      color: #f8fafc; padding: 5px 8px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    button.ctrl-btn:hover { background: rgba(30, 41, 59, 0.96); }
+    button.ctrl-btn:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #020617; }
+    button.ctrl-btn:disabled { opacity: 0.42; cursor: not-allowed; }
+    button.quest-ready { border-color: #facc15; color: #fef08a; }
+
+    #toast {
+      position: fixed; top: 62px; left: 50%; transform: translateX(-50%);
+      padding: 7px 14px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+      text-align: center; pointer-events: none; z-index: 18;
+    }
+    .hidden { display: none !important; }
+
+    /* Interactive NPC Talk Prompt */
+    #npcPrompt {
+      position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%);
+      padding: 8px 16px; font-size: 13px; font-weight: 900; color: #fef08a;
+      border-color: #facc15; cursor: pointer; z-index: 16;
+    }
+
+    /* Collapsible RPG Chatbox (Bottom-Left) */
+    #chatWrap {
+      position: fixed; bottom: 12px; left: 12px; width: 295px; max-width: calc(100vw - 24px);
+      z-index: 14; pointer-events: auto;
+    }
+    body.mode-buttons #chatWrap, body.mode-drag #chatWrap {
+      bottom: 140px;
+    }
+    #chatWrap.minimized { width: auto; }
+    #chatWrap.minimized .chat-body { display: none; }
+    .chat-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px;
+      padding: 4px 8px; font-size: 11px; font-weight: 700; border-bottom: 2px solid #334155;
+    }
+    .chat-tabs { display: flex; gap: 4px; }
+    .chat-tab {
+      background: #1e293b; color: #94a3b8; border: 1px solid #475569;
+      font-family: inherit; font-size: 10px; font-weight: 700; padding: 2px 6px; cursor: pointer;
+    }
+    .chat-tab.active { background: #0284c7; color: #ffffff; border-color: #bae6fd; }
+    .chat-log {
+      height: 102px; overflow-y: auto; padding: 6px 8px;
+      font-size: 11px; line-height: 1.45; text-align: left;
+    }
+    .chat-form { display: flex; gap: 4px; padding: 5px; border-top: 2px solid #334155; }
+    .chat-input {
+      flex: 1; background: #020617; color: #f8fafc; border: 2px solid #475569;
+      font-family: inherit; font-size: 11px; padding: 4px 6px;
+      user-select: text; -webkit-user-select: text;
+    }
+
+    /* Touch Controls */
+    .mobile-controls {
+      position: fixed; bottom: 16px; left: 16px; right: 16px;
+      display: flex; align-items: flex-end; justify-content: space-between;
+      pointer-events: none; z-index: 12;
+    }
+    #stickZone {
+      width: 114px; height: 114px; border-radius: 50%;
+      background: rgba(15, 23, 42, 0.42); border: 3px solid rgba(226, 232, 240, 0.65);
+      position: relative; pointer-events: auto;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #stickKnob {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: rgba(248, 250, 252, 0.85); border: 3px solid #0f172a;
+    }
+    #dragPad {
+      position: fixed; left: 0; top: 60px; bottom: 0; width: 48vw;
+      pointer-events: auto; z-index: 11; display: none;
+    }
+    #dragIndicator {
+      position: fixed; width: 76px; height: 76px; border-radius: 50%;
+      border: 3px solid rgba(103, 232, 249, 0.75);
+      background: rgba(15, 23, 42, 0.35);
+      pointer-events: none; transform: translate(-50%, -50%);
+      display: none; z-index: 12;
+    }
+    /* Over-the-Shoulder 3rd-Person Shooter Crosshair (Fixed in open right-of-shoulder lane — NEVER on top of hero!) */
+    #csCrosshair {
+      position: fixed; left: 50%; top: 38%; width: 26px; height: 26px;
+      transform: translate(-50%, -50%); pointer-events: none; z-index: 14;
+      transition: transform 0.08s ease, border-color 0.08s ease;
+    }
+    #csCrosshair::before, #csCrosshair::after {
+      content: ''; position: absolute; background: #4ade80;
+      box-shadow: 0 0 4px #020617, 1px 1px 0 #020617;
+    }
+    #csCrosshair::before { left: 12px; top: 3px; width: 2px; height: 20px; }
+    #csCrosshair::after  { top: 12px; left: 3px; height: 2px; width: 20px; }
+    #csCrosshair.locked {
+      width: 34px; height: 34px;
+      border: 2px solid #f43f5e;
+      border-radius: 50%;
+      box-shadow: 0 0 12px rgba(244, 63, 94, 0.9), inset 0 0 6px rgba(250, 204, 21, 0.45);
+    }
+    #csCrosshair.locked::before { left: 14px; top: 5px; height: 20px; background: #facc15; }
+    #csCrosshair.locked::after  { top: 14px; left: 5px; width: 20px; background: #facc15; }
+    /* Pinned Active Quest Tracker HUD (Right Side, Collapsible, Compass Wayfinder!) */
+    #questTrackerHud {
+      position: fixed; top: 64px; right: 10px; width: 256px; max-width: 62vw;
+      z-index: 11; pointer-events: auto; font-size: 11px;
+    }
+    #questTrackerHud.minimized .qt-body { display: none; }
+    .qt-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 4px;
+      padding: 4px 7px; border-bottom: 2px solid #334155; background: rgba(2, 6, 23, 0.78);
+    }
+    .qt-body { padding: 7px 8px; line-height: 1.45; }
+    .qt-bar { height: 7px; background: #1e293b; border: 1px solid #475569; margin: 4px 0; }
+    .qt-bar-fill { height: 100%; background: linear-gradient(90deg, #38bdf8, #34d399); transition: width 0.2s ease; }
+    .qt-compass {
+      display: flex; align-items: center; gap: 6px; margin-top: 4px;
+      padding: 4px 6px; background: rgba(2, 6, 23, 0.65); border: 1px solid #334155;
+      color: #67e8f9; font-weight: 700; font-size: 10px;
+    }
+    .qt-arrow {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; flex-shrink: 0;
+      background: #0f172a; border: 2px solid #facc15; color: #facc15; font-size: 13px; font-weight: 900;
+    }
+    .reward-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .reward-pill {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 2px 6px; font-size: 10px; font-weight: 700;
+      background: rgba(113, 63, 18, 0.45); border: 1px solid #facc15; color: #fef08a;
+    }
+    .reward-pill.unlock {
+      background: rgba(12, 74, 110, 0.55); border-color: #38bdf8; color: #bae6fd;
+    }
+    .action-btns { display: flex; gap: 8px; pointer-events: auto; }
+    .touch-btn {
+      width: 62px; height: 62px; border-radius: 10px;
+      font-family: inherit; font-weight: 900; font-size: 12px;
+      color: #f8fafc; cursor: pointer;
+    }
+    #btnAttack { background: rgba(225, 29, 72, 0.88); border-color: #fecdd3; }
+    #btnJump { background: rgba(14, 165, 233, 0.88); border-color: #e0f2fe; }
+    #btnDash { background: rgba(234, 88, 12, 0.88); border-color: #fed7aa; }
+
+    body.mode-keyboard .mobile-controls { display: none; }
+    body.mode-gamepad .mobile-controls { display: none; }
+    body.mode-buttons .mobile-controls { display: flex; }
+    body.mode-drag .mobile-controls { display: flex; justify-content: flex-end; }
+    body.mode-drag #stickZone { display: none; }
+    body.mode-drag #dragPad { display: block; }
+
+    /* Overlays & Modals */
+    .overlay {
+      position: fixed; inset: 0; background: rgba(2, 6, 23, 0.68);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 30; padding: 14px;
+    }
+    .title-screen {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; gap: 20px; padding: 28px 36px;
+    }
+    .title-screen h1 {
+      margin: 0; font-size: clamp(32px, 6vw, 54px); color: #facc15;
+      text-shadow: 4px 4px 0 #020617; letter-spacing: 3px;
+    }
+    .modal {
+      max-width: 540px; width: 100%; max-height: 90vh; overflow-y: auto;
+      padding: 20px; text-align: center;
+    }
+    .modal h1 {
+      margin: 0 0 8px; font-size: 21px; color: #facc15;
+      text-shadow: 3px 3px 0 #020617; letter-spacing: 2px;
+    }
+    .modal p { margin: 6px 0; font-size: 12px; line-height: 1.5; color: #cbd5e1; }
+    .play-cta {
+      padding: 13px 38px; font-family: inherit; font-size: 18px; font-weight: 900;
+      background: #22c55e; color: #052e16; border: 3px solid #dcfce7;
+      box-shadow: 4px 4px 0 #020617; cursor: pointer; letter-spacing: 2px;
+    }
+    .play-cta:hover { background: #4ade80; }
+    .play-cta:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #020617; }
+
+    .option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 10px 0; }
+    .controls-box {
+      text-align: left; background: rgba(2, 6, 23, 0.65); padding: 9px 11px;
+      margin: 10px 0 12px; border: 2px solid #334155; font-size: 11px; line-height: 1.65;
+      color: #e2e8f0;
+    }
+    .section-lbl { color: #67e8f9; font-weight: 700; margin-bottom: 4px; display: block; }
+
+    /* Lists & Cards */
+    .item-list { display: flex; flex-direction: column; gap: 7px; margin: 10px 0; text-align: left; }
+    .item-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      background: rgba(2, 6, 23, 0.72); border: 2px solid #334155; padding: 8px 10px;
+      font-size: 12px;
+    }
+    .item-row-left { display: flex; align-items: center; gap: 9px; flex: 1; }
+    .item-row.equipped { border-color: #facc15; background: rgba(113, 63, 18, 0.3); }
+    .item-row.empty-slot { opacity: 0.45; border-style: dashed; justify-content: center; font-size: 11px; }
+    .slot-header {
+      font-size: 11px; font-weight: 700; color: #facc15; letter-spacing: 0.8px;
+      margin: 8px 0 3px; text-transform: uppercase; border-bottom: 1px solid #334155; padding-bottom: 2px;
+    }
+    .tab-bar { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin: 8px 0 10px; }
+    .tab-bar button.active { background: #0284c7; border-color: #bae6fd; color: #ffffff; }
+    .glow-dot {
+      display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+      border: 1px solid #ffffff; vertical-align: middle; margin-right: 4px;
+    }
+
+    .world-card {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      background: rgba(2, 6, 23, 0.72); border: 2px solid #334155; padding: 8px 10px;
+      text-align: left; font-size: 12px;
+    }
+    .lvl-input, .txt-input {
+      font-family: inherit; font-size: 12px; font-weight: 700;
+      background: #0f172a; color: #facc15; border: 2px solid #64748b; padding: 5px 8px;
+      user-select: text; -webkit-user-select: text;
+    }
+    .lvl-input { width: 64px; text-align: center; }
+
+    .preset-row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin: 10px 0 12px; }
+    .preset-btn.active { background: #0284c7; border-color: #bae6fd; color: #ffffff; }
+    .bind-grid {
+      display: grid; grid-template-columns: 1fr auto; gap: 6px 10px;
+      text-align: left; align-items: center;
+      background: rgba(2, 6, 23, 0.65); padding: 10px 12px;
+      border: 2px solid #334155; font-size: 12px; margin-bottom: 12px;
+      max-height: 235px; overflow-y: auto;
+    }
+    .bind-key {
+      min-width: 96px; text-align: center; padding: 4px 8px;
+      font-family: inherit; font-size: 12px; font-weight: 700;
+      background: #1e293b; color: #facc15; border: 2px solid #64748b; cursor: pointer;
+    }
+    .bind-key.listening { background: #ca8a04; color: #020617; border-color: #fef08a; }
+    textarea.save-box {
+      width: 100%; height: 64px; background: #020617; color: #67e8f9;
+      border: 2px solid #475569; font-family: monospace; font-size: 11px; padding: 6px;
+      user-select: text; -webkit-user-select: text;
+    }
+
+    #avatarOverlay { justify-content: flex-end; background: rgba(2, 6, 23, 0.22); }
+    .avatar-panel { max-width: 360px; width: 100%; max-height: 92vh; overflow-y: auto; padding: 16px; text-align: left; }
+    .avatar-section { margin: 10px 0; }
+    .avatar-section label { display: block; font-size: 11px; font-weight: 700; color: #67e8f9; margin-bottom: 5px; }
+    .swatch-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .swatch-btn { width: 28px; height: 28px; border: 2px solid #64748b; cursor: pointer; padding: 0; }
+    .swatch-btn.active { border: 3px solid #facc15; transform: scale(1.1); }
+    .chip-btn {
+      font-family: inherit; font-size: 11px; font-weight: 700;
+      background: #1e293b; color: #e2e8f0; border: 2px solid #475569;
+      padding: 4px 8px; cursor: pointer;
+    }
+    .chip-btn.active { background: #0284c7; border-color: #bae6fd; color: #ffffff; }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Icon-Driven RPG HUD with Directly Clickable BAG, STORE, QUEST, GUILD & OPTION -->
+  <div id="hudTop" class="hud-top hidden">
+    <div class="hud-group">
+      <div class="pixel-box stat-pill">HP <span id="heartsDisplay">♥♥♥</span></div>
+      <div class="pixel-box stat-pill"><span id="levelBadge" class="gold">SAFE HAVEN</span></div>
+      <div id="onlinePill" class="pixel-box stat-pill hidden" style="color:#34d399; border-color:#34d399;">● <span id="onlineCountEl">1</span> ONLINE</div>
+      <div class="pixel-box stat-pill"><span id="weaponIconSlot"></span><span id="weaponDisplay" class="cyan">Stone Lv1</span></div>
+      <div class="pixel-box stat-pill"><span id="coinIconSlot"></span><span id="creditsDisplay" class="gold">50</span></div>
+    </div>
+    <div class="hud-group">
+      <button id="hudBagBtn" class="pixel-box ctrl-btn"></button>
+      <button id="hudStoreBtn" class="pixel-box ctrl-btn"></button>
+      <button id="hudQuestBtn" class="pixel-box ctrl-btn"></button>
+      <button id="hudGuildBtn" class="pixel-box ctrl-btn"></button>
+      <button id="hudArenaBtn" class="pixel-box ctrl-btn" style="border-color:#fb7185; color:#fda4af;"></button>
+      <button id="optionBtn" class="pixel-box ctrl-btn">OPTION</button>
+    </div>
+  </div>
+
+  <!-- Brief event toast -->
+  <div id="toast" class="pixel-box hidden"></div>
+
+  <!-- 3rd-Person Shooter Aim Crosshair -->
+  <div id="csCrosshair" class="hidden"></div>
+
+  <!-- Pinned Active Quest Tracker HUD (Wayfinder Compass + Upfront Reward Preview!) -->
+  <div id="questTrackerHud" class="pixel-box hidden">
+    <div class="qt-header">
+      <span class="gold" style="font-weight:900; font-size:10px; letter-spacing:0.6px;">★ QUEST TRACKER</span>
+      <div style="display:flex; gap:4px;">
+        <button id="qtLogBtn" class="chat-tab" title="Open Quest Log (J)">LOG [J]</button>
+        <button id="qtMinBtn" class="chat-tab" title="Minimize/Expand Tracker">−</button>
+      </div>
+    </div>
+    <div id="qtBody" class="qt-body"></div>
+  </div>
+
+  <!-- Clickable Talk-to-NPC Prompt (when near Safe Haven NPCs) -->
+  <button id="npcPrompt" class="pixel-box hidden"></button>
+
+  <!-- Collapsible RPG Chatbox (World / Guild / System) -->
+  <div id="chatWrap" class="pixel-box hidden">
+    <div class="chat-header">
+      <div class="chat-tabs">
+        <button id="chatTabAll" class="chat-tab active">WORLD</button>
+        <button id="chatTabGuild" class="chat-tab">GUILD</button>
+        <button id="chatTabSys" class="chat-tab">LOG</button>
+      </div>
+      <button id="chatMinBtn" class="chat-tab" title="Minimize/Expand Chat">−</button>
+    </div>
+    <div class="chat-body">
+      <div id="chatLog" class="chat-log"></div>
+      <form id="chatForm" class="chat-form">
+        <input id="chatInput" class="chat-input" maxlength="100" placeholder="Type message..." autocomplete="off" />
+        <button type="submit" class="chat-tab active">SEND</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Drag-Steer Zone & Touch Controls -->
+  <div id="dragPad"></div>
+  <div id="dragIndicator"></div>
+  <div id="mobileControls" class="mobile-controls hidden">
+    <div id="stickZone"><div id="stickKnob"></div></div>
+    <div class="action-btns">
+      <button id="btnAttack" class="pixel-box touch-btn">ATK</button>
+      <button id="btnDash" class="pixel-box touch-btn">DASH</button>
+      <button id="btnJump" class="pixel-box touch-btn">JUMP</button>
+    </div>
+  </div>
+
+  <!-- Clean Intro Title Screen -->
+  <div id="startOverlay" class="overlay">
+    <div class="title-screen">
+      <h1>SKYBOUND RELICS</h1>
+      <button id="startBtn" class="play-cta">START</button>
+    </div>
+  </div>
+
+  <!-- Single OPTION Settings Menu -->
+  <div id="optionOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1>OPTION</h1>
+      <div class="option-grid">
+        <button id="avatarBtn" class="pixel-box ctrl-btn">CHARACTER DESIGN</button>
+        <button id="worldsBtn" class="pixel-box ctrl-btn">5 WORLDS / LVLS</button>
+        <button id="saveMenuBtn" class="pixel-box ctrl-btn">SAVE GAME</button>
+        <button id="havenBtn" class="pixel-box ctrl-btn">SAFE HAVEN</button>
+        <button id="inputModeBtn" class="pixel-box ctrl-btn">CTRL: KEYBOARD &amp; MOUSE</button>
+        <button id="camModeBtn" class="pixel-box ctrl-btn">CAM: MOUSE AIM</button>
+        <button id="autoAimBtn" class="pixel-box ctrl-btn">AUTO-AIM: ON</button>
+        <button id="keysBtn" class="pixel-box ctrl-btn">EDIT KEYS</button>
+        <button id="pixelModeBtn" class="pixel-box ctrl-btn">PIXELS: CRISP HD</button>
+        <button id="bgmBtn" class="pixel-box ctrl-btn">BGM: ON</button>
+        <button id="muteBtn" class="pixel-box ctrl-btn">SFX: ON</button>
+        <button id="tutorialBtn" class="pixel-box ctrl-btn" style="grid-column: span 2; border-color:#38bdf8; color:#bae6fd;">RULES &amp; TUTORIAL</button>
+        <button id="adminMenuBtn" class="pixel-box ctrl-btn hidden" style="grid-column: span 2; border-color:#fb7185; color:#fda4af;">OWNER ADMIN</button>
+      </div>
+      <div class="controls-box">
+        <span class="section-lbl">CONTROLS &amp; STATS</span>
+        <div id="controlsSummary"></div>
+      </div>
+      <button id="resumeBtn" class="play-cta" style="padding:10px 28px; font-size:15px;">RESUME</button>
+    </div>
+  </div>
+
+  <!-- Rules & How-To-Play Tutorial Modal (Auto-shown once when starting!) -->
+  <div id="tutorialOverlay" class="overlay hidden">
+    <div class="pixel-box modal" style="max-width:600px;">
+      <h1>HOW TO PLAY · RULES &amp; TUTORIAL</h1>
+      <p class="cyan" style="margin-top:-2px;">Welcome to <b>SKYBOUND RELICS</b>! Master these basics before stepping into the portals:</p>
+      <div class="controls-box">
+        <span class="section-lbl">1. MISSION &amp; LEVEL RULES (400 LEVELS · 4 REALMS)</span>
+        • Reclaim the shattered Sky Crown across <b>Sky Forest, Sky Beach, Sky Desert &amp; Sky Dungeon</b>.<br />
+        • <b>Sealed Sky Relic:</b> You cannot rush past enemies! Defeat at least <b>65% of Guardians</b> (and the <b>Boss</b> every 10th level) to break the red seal and finish each stage.<br />
+        • <b>Active Obstacles:</b> Jump or Dash over Pop-Up Spikes, Spinning Blades, Swinging Axes, Sliding Crushers, Crumbling Bridges, Energy Turrets &amp; Biome Hazards!<br />
+        • <b>Hearts &amp; 1UP Heart Stones:</b> Missing hearts automatically regenerate <b>+1 ♥ every 15 seconds</b> (up to 3 hearts), or grab glowing <b>1UP ♥ Heart Stones</b> on islands &amp; enemy drops for instant healing!
+      </div>
+      <div class="controls-box">
+        <span class="section-lbl">2. CONTROLS (KEYBOARD &amp; MOUSE · CONTROLLER · MOBILE)</span>
+        • <b>Keyboard &amp; Mouse:</b> Click the game to aim with <b>360° Mouse Look</b> (<b>Esc</b> or <b>Tab</b> frees your cursor for menus). <b>W/A/S/D</b> Move &amp; Strafe · <b>Left-Click / F</b> Attack · <b>Right-Click / Shift</b> Dash · <b>Space</b> Jump / Double-Jump · <b>T</b> Talk to NPC · <b>J</b> Quest Log · <b>Scroll</b> Zoom.<br />
+        • <b>Green Aim Reticle:</b> Locks directly onto the enemy in range — never blocked by your hero!<br />
+        • <b>Xbox / PlayStation Controller:</b> Plug-and-play (Left Stick Move · Right Stick Cam · <b>A/✕</b> Jump · <b>X/□/RT</b> Attack · <b>B/○</b> Dash). Switch mobile/touch modes anytime in <b>OPTION</b>.
+      </div>
+      <div class="controls-box">
+        <span class="section-lbl">3. LOOT, 15-SLOT BAG &amp; UPGRADE STORE</span>
+        • Enemies drop <b>Credit Coins</b> and <i>rarely</i> drop weapons. Picked-up weapons go straight to your <b>15-Slot Bag</b> (your equipped weapon never switches automatically!).<br />
+        • Open <b>STORE</b> anytime to buy Knives, Daggers, Bows, <b>Elemental Arrows</b>, Spears, Swords &amp; Battle Axes, upgrade Weapons &amp; 3D Armor up to <b>Lv 6 Mythic Glow</b>, or sell extra Bag items.<br />
+        • Look for <b>Hidden Golden Chests</b> every 25th level &amp; the Merchant Store every 10th level!
+      </div>
+      <div class="controls-box">
+        <span class="section-lbl">4. CLOUD SAFE HAVEN, GUILDS (100 MEMBERS) &amp; SKY ARENA</span>
+        • Talk to Safe Haven NPCs (<b>Elder Rowan, Merchant Mira, Blacksmith Torin, Guild Master Kael, Champion Rex</b>) to unlock Story Quests &amp; rewards.<br />
+        • Create or join a <b>Guild (up to 100 members)</b> for permanent buffs — <b>Warning:</b> Guild Hard Mode makes enemies tougher &amp; smarter, with bonus Arena rewards!<br />
+        • Click <b>ARENA</b> (or enter the center portal) to battle tactical <b>AI NPC Challengers</b> across 4 Tiers!
+      </div>
+      <button id="closeTutorialBtn" class="play-cta" style="padding:10px 26px; font-size:14px;">GOT IT — LET'S PLAY! &rarr;</button>
+    </div>
+  </div>
+
+  <!-- Talkable NPC Story Dialogue Modal -->
+  <div id="npcOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1 id="npcModalName">ELDER ROWAN</h1>
+      <p id="npcModalRole" class="cyan" style="font-weight:700; margin-top:-4px;"></p>
+      <div id="npcDialogueBox" class="controls-box" style="font-size:12px;"></div>
+      <div id="npcQuestList" class="item-list"></div>
+      <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:10px;">
+        <button id="npcActionBtn" class="play-cta hidden" style="padding:8px 18px; font-size:13px;"></button>
+        <button id="closeNpcBtn" class="pixel-box ctrl-btn" style="padding:8px 20px;">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Story Chronicle & Quest Log Modal -->
+  <div id="questOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1>STORY &amp; QUESTS</h1>
+      <div id="storyIntroBox" class="controls-box" style="font-size:11px;"></div>
+      <div id="questLogList" class="item-list"></div>
+      <button id="closeQuestBtn" class="pixel-box ctrl-btn" style="padding:8px 22px;">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Guilds / Alliances Modal -->
+  <div id="guildOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1>GUILDS &amp; ALLIANCES</h1>
+      <div id="guildContent"></div>
+      <button id="closeGuildBtn" class="pixel-box ctrl-btn" style="padding:8px 22px; margin-top:10px;">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Sky Arena AI PvP Colosseum Modal -->
+  <div id="arenaOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1 style="color:#fda4af;">SKY ARENA (AI PVP)</h1>
+      <div id="arenaContent"></div>
+      <button id="closeArenaBtn" class="pixel-box ctrl-btn" style="padding:8px 22px; margin-top:10px;">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Live 3D Character Customizer & Pre-Game Hero Creator Drawer -->
+  <div id="avatarOverlay" class="overlay hidden">
+    <div class="pixel-box avatar-panel">
+      <h1 id="avatarTitle" style="font-size:18px; margin:0 0 4px; color:#facc15; text-align:center;">CREATE YOUR HERO</h1>
+      <p id="avatarSubtitle" style="font-size:10px; margin:0 0 8px; text-align:center; color:#bae6fd;">Choose your Hero Name &amp; Style before entering the skies!</p>
+      <div class="avatar-section">
+        <label>HERO NAME (3-16 CHARS)</label>
+        <div style="display:flex; gap:6px;">
+          <input id="heroNameInput" class="txt-input" style="flex:1; min-width:120px;" maxlength="16" placeholder="Enter your hero name..." />
+          <button id="randomNameBtn" class="pixel-box ctrl-btn" type="button" title="Random Name">RANDOM</button>
+        </div>
+      </div>
+      <div class="avatar-section"><label>SKIN COLOR</label><div id="avSkinRow" class="swatch-row"></div></div>
+      <div class="avatar-section"><label>FACE EMOTION</label><div id="avEmotionRow" class="swatch-row"></div></div>
+      <div class="avatar-section"><label>HAIR STYLE</label><div id="avHairStyleRow" class="swatch-row"></div></div>
+      <div class="avatar-section"><label>HAIR &amp; BEARD COLOR</label><div id="avHairColorRow" class="swatch-row"></div></div>
+      <div class="avatar-section"><label>BEARD / FACIAL HAIR</label><div id="avBeardRow" class="swatch-row"></div></div>
+      <div class="avatar-section"><label>FREE CLOTHING OUTFIT</label><div id="avOutfitRow" class="swatch-row"></div></div>
+      <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-top:12px;">
+        <button id="rotAvLeftBtn" class="pixel-box ctrl-btn">&larr; TURN</button>
+        <button id="rotAvRightBtn" class="pixel-box ctrl-btn">TURN &rarr;</button>
+        <button id="randomStyleBtn" class="pixel-box ctrl-btn" style="color:#67e8f9;">RANDOMIZE</button>
+        <button id="closeAvatarBtn" class="play-cta" style="padding:8px 20px; font-size:13px;">ENTER WORLD &rarr;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 15-Slot Character Bag Modal -->
+  <div id="bagOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1>CHARACTER BAG</h1>
+      <p id="bagSummary"></p>
+      <div id="bagArrowRow" class="tab-bar"></div>
+      <div id="bagList" class="item-list"></div>
+      <button id="closeBagBtn" class="pixel-box ctrl-btn" style="padding:8px 22px;">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- 4-Tab Slotted Upgrade Store -->
+  <div id="shopOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1 id="shopTitle">UPGRADE STORE</h1>
+      <p id="shopSubtitle"></p>
+      <div class="pixel-box stat-pill" style="justify-content:center; margin:6px 0;">
+        CREDITS: <span id="shopCredits" class="gold">0</span>
+        &nbsp;|&nbsp; BAG: <span id="shopBagCount" class="cyan">1/15</span>
+      </div>
+      <div class="tab-bar">
+        <button id="tabWeapons" class="pixel-box ctrl-btn active">WEAPONS &amp; ARROWS</button>
+        <button id="tabUpgrades" class="pixel-box ctrl-btn">UPGRADES</button>
+        <button id="tabSell" class="pixel-box ctrl-btn">SELL BAG</button>
+        <button id="tabCredits" class="pixel-box ctrl-btn">CREDITS</button>
+      </div>
+      <div id="shopTabContent" class="item-list"></div>
+      <button id="closeShopBtn" class="play-cta" style="padding:10px 26px; font-size:14px; margin-top:8px;">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Owner-Only Admin Panel (Hidden & Disabled in Public Player Downloads!) -->
+  <div id="adminOverlay" class="overlay hidden">
+    <div class="pixel-box modal" style="border-color:#fb7185;">
+      <h1 style="color:#fda4af;">OWNER ADMIN PANEL</h1>
+      <p>Visible ONLY on your local Owner build — stripped from public player downloads.</p>
+      <div class="option-grid">
+        <button id="admAdd500" class="pixel-box ctrl-btn">+500 CREDITS</button>
+        <button id="admAdd5000" class="pixel-box ctrl-btn">+5,000 CREDITS</button>
+        <button id="admGodMode" class="pixel-box ctrl-btn">GOD MODE: OFF</button>
+        <button id="admPreviewAll" class="pixel-box ctrl-btn">UNLOCK ALL LVLS: OFF</button>
+        <button id="admMaxGlow" class="pixel-box ctrl-btn">MAX LV6 MYTHIC GLOW</button>
+        <button id="admGiveGear" class="pixel-box ctrl-btn">ADD RARE GEAR TO BAG</button>
+        <button id="admOpenStore" class="pixel-box ctrl-btn" style="grid-column: span 2;">TEST 10TH-LEVEL STORE POP-UP</button>
+      </div>
+      <button id="closeAdminBtn" class="pixel-box ctrl-btn" style="padding:8px 22px; margin-top:8px;">BACK</button>
+    </div>
+  </div>
+
+  <!-- 5 Worlds & Sequential Level Selector -->
+  <div id="worldsOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1>5 WORLDS (400 LEVELS)</h1>
+      <p>Unlock level-by-level (1–100) and world-by-world: Forest → Beach → Desert → Dungeon.</p>
+      <div id="worldsList" class="item-list"></div>
+      <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:10px;">
+        <button id="previewToggleBtn" class="pixel-box ctrl-btn">PREVIEW ALL: OFF</button>
+        <button id="closeWorldsBtn" class="pixel-box ctrl-btn">BACK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save / Load Modal -->
+  <div id="saveOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1>SAVE GAME</h1>
+      <p id="saveStatus">Progress auto-saves locally on level clears, chests, quests, and upgrades.</p>
+      <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:10px 0;">
+        <button id="saveNowBtn" class="play-cta" style="padding:8px 18px; font-size:13px;">SAVE NOW</button>
+        <button id="exportSaveBtn" class="pixel-box ctrl-btn">COPY CODE</button>
+        <button id="importSaveBtn" class="pixel-box ctrl-btn">LOAD CODE</button>
+        <button id="resetSaveBtn" class="pixel-box ctrl-btn" style="color:#fb7185;">NEW SAVE</button>
+      </div>
+      <textarea id="saveCodeBox" class="save-box" placeholder="Save code appears here for backup / transferring to Android..."></textarea>
+      <div style="margin-top:10px;"><button id="closeSaveBtn" class="pixel-box ctrl-btn" style="padding:8px 22px;">BACK</button></div>
+    </div>
+  </div>
+
+  <!-- Keyboard Remap Modal -->
+  <div id="keysOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1>KEYBOARD CONTROLS</h1>
+      <p>Pick a preset or click any key button to rebind it.</p>
+      <div class="preset-row">
+        <button id="presetWasd" class="pixel-box ctrl-btn preset-btn">WASD + F</button>
+        <button id="presetArrows" class="pixel-box ctrl-btn preset-btn">ARROWS + Z/C/X</button>
+        <button id="presetReset" class="pixel-box ctrl-btn">RESET</button>
+      </div>
+      <div id="bindGrid" class="bind-grid"></div>
+      <button id="closeKeysBtn" class="play-cta" style="padding:8px 22px; font-size:14px;">BACK</button>
+    </div>
+  </div>
+
+  <!-- Level Clear Modal -->
+  <div id="levelClearOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1 id="levelClearTitle">LEVEL CLEAR!</h1>
+      <p id="levelClearInfo"></p>
+      <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:10px;">
+        <button id="nextLevelBtn" class="play-cta" style="padding:10px 24px; font-size:15px;">NEXT LEVEL &rarr;</button>
+        <button id="clearHavenBtn" class="pixel-box ctrl-btn" style="padding:10px 16px;">SAFE HAVEN</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Over Modal -->
+  <div id="gameOverOverlay" class="overlay hidden">
+    <div class="pixel-box modal">
+      <h1 style="color:#fb7185;">OUT OF HEARTS!</h1>
+      <p>You lost all 3 hearts. Retry this level or return to Safe Haven to upgrade your gear!</p>
+      <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:10px;">
+        <button id="retryBtn" class="play-cta" style="padding:10px 24px; font-size:15px;">RETRY LEVEL</button>
+        <button id="goHavenBtn" class="pixel-box ctrl-btn" style="padding:10px 16px;">SAFE HAVEN</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js?v=29"></script>
+</body>
+</html>
