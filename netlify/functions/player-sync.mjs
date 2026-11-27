@@ -51,10 +51,23 @@ export default async (req, context) => {
         totalKills: Math.max(0, Number(body?.totalKills) || 0),
         guildName: body?.guildName ? String(body.guildName).slice(0, 24) : null,
         isOwner: Boolean(existing?.isOwner),
+        banned: Boolean(existing?.banned),
+        banReason: existing?.banReason ? String(existing.banReason).slice(0, 100) : "",
         firstSeen: existing?.firstSeen || Date.now(),
         lastSeen: Date.now(),
       };
       await store.setJSON(playerKey, profile);
+
+      if (profile.banned) {
+        return jsonRes({
+          ok: true,
+          banned: true,
+          banReason: profile.banReason || "Suspended by Owner",
+          isOwner: false,
+          claimedGifts: [],
+          totalGiftCredits: 0,
+        });
+      }
 
       // Claim any pending Owner Coin Gifts stored as immutable blobs under gifts/<playerId>/
       const giftPrefix = `gifts/${playerId}/`;
@@ -88,6 +101,10 @@ export default async (req, context) => {
     }
 
     if (action === "redeem") {
+      const pCheck = await store.get(`players/${playerId}`, { type: "json", consistency: "strong" });
+      if (pCheck?.banned) {
+        return jsonRes({ ok: false, error: "This account is suspended and cannot redeem codes." }, 403);
+      }
       const code = String(body?.code || "").trim().toUpperCase();
       if (!CODE_RE.test(code)) {
         return jsonRes({ ok: false, error: "Invalid code format (expected SKY-XXXX-XXXX)" }, 400);

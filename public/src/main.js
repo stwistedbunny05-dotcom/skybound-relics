@@ -2004,6 +2004,20 @@ async function syncPlayerMailbox(manual = false) {
       };
     }
     const data = await res.json();
+    if (data.banned) {
+      paused = true;
+      if (document.pointerLockElement === canvas && document.exitPointerLock) document.exitPointerLock();
+      const reason = data.banReason || 'Suspended by Owner';
+      if (!document.getElementById('banScreenOverlay')) {
+        const banDiv = document.createElement('div');
+        banDiv.id = 'banScreenOverlay';
+        banDiv.className = 'overlay';
+        banDiv.style.zIndex = '9999';
+        banDiv.innerHTML = `<div class="pixel-box modal" style="border-color:#fb7185;"><h1 style="color:#fb7185;">ACCOUNT SUSPENDED</h1><p>Player ID <b>${escHtml(saveState.playerId)}</b> has been suspended by the Game Owner.</p><p style="color:#fda4af;margin-top:8px;">Reason: ${escHtml(reason)}</p></div>`;
+        document.body.appendChild(banDiv);
+      }
+      return { ok: false, total: 0, msg: `Account suspended: ${reason}` };
+    }
     let changed = false;
     if (typeof data.isOwner === 'boolean' && saveState.isOwnerBadge !== data.isOwner) {
       saveState.isOwnerBadge = data.isOwner;

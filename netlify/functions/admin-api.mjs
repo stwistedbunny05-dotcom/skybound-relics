@@ -166,6 +166,37 @@ export default async (req, context) => {
       return jsonRes({ ok: true, player: existing });
     }
 
+    if (action === "toggle_ban") {
+      const playerId = String(body?.playerId || "").trim().toUpperCase();
+      if (!PLAYER_ID_RE.test(playerId)) {
+        return jsonRes({ ok: false, error: "Invalid Player ID" }, 400);
+      }
+      const key = `players/${playerId}`;
+      const existing = await store.get(key, { type: "json", consistency: "strong" });
+      if (!existing) {
+        return jsonRes({ ok: false, error: "Player not found" }, 404);
+      }
+      existing.banned = !existing.banned;
+      existing.banReason = existing.banned
+        ? String(body?.reason || "Suspended by Owner").trim().slice(0, 100)
+        : "";
+      await store.setJSON(key, existing);
+      return jsonRes({ ok: true, player: existing });
+    }
+
+    if (action === "delete_player") {
+      const playerId = String(body?.playerId || "").trim().toUpperCase();
+      if (!PLAYER_ID_RE.test(playerId)) {
+        return jsonRes({ ok: false, error: "Invalid Player ID" }, 400);
+      }
+      await store.delete(`players/${playerId}`);
+      const { blobs } = await store.list({ prefix: `gifts/${playerId}/` });
+      for (const b of blobs || []) {
+        await store.delete(b.key);
+      }
+      return jsonRes({ ok: true, deleted: playerId });
+    }
+
     return jsonRes({ ok: false, error: "Unknown admin action" }, 400);
   } catch (err) {
     console.error("admin-api error:", err);

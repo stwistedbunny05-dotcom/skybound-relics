@@ -309,11 +309,13 @@
           <td style="color:#facc15;font-weight:800;">${Number(p.credits || 0).toLocaleString()}</td>
           <td>${Number(p.totalKills || 0)}</td>
           <td>${p.guildName ? esc(p.guildName) : '<span style="opacity:.5;">—</span>'}</td>
-          <td>${p.isOwner ? '<span class="pill gold">OWNER</span>' : '<span class="pill">PLAYER</span>'}</td>
+          <td>${p.banned ? '<span class="pill red">BANNED</span>' : (p.isOwner ? '<span class="pill gold">OWNER</span>' : '<span class="pill">PLAYER</span>')}</td>
           <td>${fmtTime(p.lastSeen)}</td>
           <td>
             <button type="button" class="primary sm" data-pick-id="${esc(p.playerId)}">SEND COINS</button>
             <button type="button" class="sm" data-owner-id="${esc(p.playerId)}">${p.isOwner ? 'REMOVE OWNER' : 'MAKE OWNER'}</button>
+            <button type="button" class="${p.banned ? 'cyan' : 'danger'} sm" data-ban-id="${esc(p.playerId)}" data-banned="${p.banned ? '1' : '0'}">${p.banned ? 'UNBAN' : 'BAN'}</button>
+            <button type="button" class="danger sm" data-del-player="${esc(p.playerId)}">DELETE</button>
           </td>
         </tr>
       `).join('');
@@ -453,6 +455,34 @@
         try {
           const res = await callAdmin({ action: 'toggle_owner', playerId: own.dataset.ownerId });
           showBoxMsg(globalMsg, `${res.player.playerId} is now ${res.player.isOwner ? 'OWNER' : 'PLAYER'}.`, 'ok');
+          await loadDashboard();
+        } catch (err) {
+          showBoxMsg(globalMsg, err.message, 'err');
+        }
+        return;
+      }
+      const banBtn = e.target.closest('[data-ban-id]');
+      if (banBtn) {
+        const pid = banBtn.dataset.banId;
+        const isBanned = banBtn.dataset.banned === '1';
+        const reason = isBanned ? '' : (prompt(`Reason for banning ${pid}? (optional)`, 'Suspended by Owner') ?? '');
+        if (!isBanned && reason === null) return;
+        try {
+          const res = await callAdmin({ action: 'toggle_ban', playerId: pid, reason });
+          showBoxMsg(globalMsg, `${pid} has been ${res.player.banned ? 'BANNED' : 'UNBANNED'}.`, res.player.banned ? 'err' : 'ok');
+          await loadDashboard();
+        } catch (err) {
+          showBoxMsg(globalMsg, err.message, 'err');
+        }
+        return;
+      }
+      const delBtn = e.target.closest('[data-del-player]');
+      if (delBtn) {
+        const pid = delBtn.dataset.delPlayer;
+        if (!confirm(`Delete ${pid} and any pending gifts from the server list?\n\nTip: Use BAN instead if you want to permanently block them from rejoining.`)) return;
+        try {
+          await callAdmin({ action: 'delete_player', playerId: pid });
+          showBoxMsg(globalMsg, `Deleted player ${pid} from the server list.`, 'ok');
           await loadDashboard();
         } catch (err) {
           showBoxMsg(globalMsg, err.message, 'err');
