@@ -15,10 +15,10 @@ import {
   ABILITY_CATALOG, ABILITY_BY_ID, getHighestUnlockedDifficultyTier, getAbilityMaxLevelForState,
   isAbilityUnlocked, getAbilityLevel, getAbilityUpgradeCost, getAbilityStats,
 } from './state.js';
-import { buildSafeHavenDef, buildSkyArenaDef, generateBiomeLevel, SAFE_HAVEN_SPAWN_POINTS } from './biomes.js?v=4.15';
-import { buildLevelWorld } from './world.js?v=4.15';
+import { buildSafeHavenDef, buildSkyArenaDef, generateBiomeLevel, SAFE_HAVEN_SPAWN_POINTS } from './biomes.js?v=4.16';
+import { buildLevelWorld } from './world.js?v=4.16';
 import { CombatSystem } from './combat.js';
-import { VoxelPlayer } from './player.js?v=4.15';
+import { VoxelPlayer } from './player.js?v=4.16';
 import { MultiplayerClient } from './multiplayer.js';
 import { audio } from './audio.js';
 
@@ -902,7 +902,8 @@ function updateAbilityBarUi(force = false) {
     const lvl = getAbilityLevel(saveState, ab.id);
     const cd = ab.type === 'active' ? Math.ceil((player.abilityCooldowns[ab.id] || 0) * 10) / 10 : 0;
     const activeGlow = (ab.id === 'aegisShield' && player.aegisTimer > 0) || (ab.id === 'skyGlide' && player.isGliding);
-    parts.push(`${ab.id}:${lvl}:${cd > 0 ? cd.toFixed(1) : '0'}:${activeGlow ? 1 : 0}`);
+    const keyLbl = getAbilityKeyLabel(ab.id);
+    parts.push(`${ab.id}:${lvl}:${keyLbl}:${cd > 0 ? cd.toFixed(1) : '0'}:${activeGlow ? 1 : 0}`);
   }
   const key = parts.join('|');
   if (!force && key === lastAbilityBarKey) return;
@@ -911,17 +912,18 @@ function updateAbilityBarUi(force = false) {
   abilityBar.innerHTML = '';
   for (const ab of unlockedList) {
     const lvl = getAbilityLevel(saveState, ab.id);
+    const keyLbl = getAbilityKeyLabel(ab.id);
     if (ab.type === 'passive') {
       const pill = document.createElement('div');
       const glowing = ab.id === 'skyGlide' && player.isGliding;
       pill.className = 'ab-slot passive-pill' + (glowing ? ' active-glow' : '');
       pill.style.borderColor = ab.color;
-      pill.title = `${ab.name} Lv.${lvl} (${ab.keyLabel} / ${ab.padLabel}) — ${ab.desc}`;
+      pill.title = `${ab.name} Lv.${lvl} (${keyLbl} / ${ab.padLabel}) — ${ab.desc}`;
       pill.innerHTML =
         `<div class="ab-key" style="color:${ab.color};">LV.${lvl}</div>` +
         `<img class="ab-img" src="${ab.iconImg}" alt="${ab.name}" />` +
         `<div class="ab-name">${ab.short}</div>` +
-        `<div class="ab-cd">${ab.keyLabel}</div>`;
+        `<div class="ab-cd">${keyLbl}</div>`;
       abilityBar.appendChild(pill);
     } else {
       const cd = player.abilityCooldowns[ab.id] || 0;
@@ -931,9 +933,9 @@ function updateAbilityBarUi(force = false) {
       btn.className = 'ab-slot' + (shieldActive ? ' active-glow' : '');
       btn.style.borderColor = cd > 0 ? '#475569' : ab.color;
       btn.disabled = cd > 0;
-      btn.title = `${ab.name} Lv.${lvl} [${ab.keyLabel} / ${ab.padLabel}] — ${ab.desc}`;
+      btn.title = `${ab.name} Lv.${lvl} [${keyLbl} / ${ab.padLabel}] — ${ab.desc}`;
       btn.innerHTML =
-        `<div class="ab-key" style="color:${ab.color};">[${ab.keyLabel}] LV.${lvl}</div>` +
+        `<div class="ab-key" style="color:${ab.color};">[${keyLbl}] LV.${lvl}</div>` +
         `<img class="ab-img" src="${ab.iconImg}" alt="${ab.name}" />` +
         `<div class="ab-name">${ab.short}</div>` +
         `<div class="ab-cd" style="color:${shieldActive ? '#facc15' : (cd > 0 ? '#fb7185' : '#34d399')};">${shieldActive ? `${player.aegisTimer.toFixed(1)}s ON` : (cd > 0 ? `${cd.toFixed(1)}s` : 'READY')}</div>`;
@@ -2053,9 +2055,10 @@ function renderShopPanel() {
             ? `NEED ${reqDiffName}`
             : `${cost} CR`;
       const iconHtml = `<img src="${ab.iconImg}" alt="${ab.name}" style="width:36px;height:36px;border-radius:4px;border:2px solid ${ab.color};image-rendering:pixelated;flex-shrink:0;object-fit:cover;background:#0f172a;" />`;
+      const abKeyLbl = getAbilityKeyLabel(ab.id);
       addRow(
         iconHtml,
-        `<span class="glow-dot" style="background:${ab.color};"></span><b>${ab.name}</b> [${ab.keyLabel} / ${ab.padLabel}] · ${statusTag}<br>` +
+        `<span class="glow-dot" style="background:${ab.color};"></span><b>${ab.name}</b> [${abKeyLbl} / ${ab.padLabel}] · ${statusTag}<br>` +
         `<span style="font-size:10px;opacity:0.84;">${ab.desc}</span><br>` +
         `<span style="font-size:10px;color:#bae6fd;">${unlocked ? `Now: ${stats.summary}` : `Lv.1: ${stats.summary}`}${unlocked && !atHardMax ? ` → Next: ${nextStats.summary}` : ''}</span>`,
         btnText,
@@ -2751,22 +2754,42 @@ function renderWorldsPanel() {
 // =========================================================================
 const KEYS_STORAGE = 'skybound_relics_keybinds_v3';
 const PRESETS = {
-  wasd:   { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space', attack: 'KeyF', dash: 'ShiftLeft', swap: 'Tab', talk: 'KeyT', camLeft: 'KeyQ', camRight: 'KeyE', respawn: 'KeyR' },
-  arrows: { forward: 'ArrowUp', back: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', jump: 'KeyZ', attack: 'KeyC', dash: 'KeyX', swap: 'Tab', talk: 'KeyT', camLeft: 'KeyA', camRight: 'KeyD', respawn: 'KeyR' },
+  wasd:   { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space', attack: 'KeyF', dash: 'ShiftLeft', swap: 'Tab', ability1: 'Digit1', ability2: 'Digit2', ability3: 'Digit3', talk: 'KeyT', camLeft: 'KeyQ', camRight: 'KeyE', respawn: 'KeyR' },
+  arrows: { forward: 'ArrowUp', back: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', jump: 'KeyZ', attack: 'KeyC', dash: 'KeyX', swap: 'Tab', ability1: 'Digit1', ability2: 'Digit2', ability3: 'Digit3', talk: 'KeyT', camLeft: 'KeyA', camRight: 'KeyD', respawn: 'KeyR' },
 };
 const ACTION_LABELS = [
   ['forward', 'Move Forward'], ['back', 'Move Backward'], ['left', 'Move Left'], ['right', 'Move Right'],
-  ['jump', 'Jump / 2x Jump'], ['attack', 'Auto-Aim Attack'], ['dash', 'Directional Dash'], ['swap', 'Next Stash Weapon'],
-  ['talk', 'Talk to NPC'], ['camLeft', 'Camera Left'], ['camRight', 'Camera Right'], ['respawn', 'Respawn'],
+  ['jump', 'Jump / 3x Jump / Hold Glide'], ['attack', 'Auto-Aim Attack'], ['dash', 'Directional Dash'], ['swap', 'Next Stash Weapon'],
+  ['ability1', 'Ability 1: Shockwave Slam'], ['ability2', 'Ability 2: Aegis Shield'], ['ability3', 'Ability 3: Sky Lightning Nova'],
+  ['talk', 'Talk / Invite NPC'], ['camLeft', 'Camera Left'], ['camRight', 'Camera Right'], ['respawn', 'Respawn'],
 ];
 
 function formatKeyCode(code) {
   if (!code) return '---';
   if (code === 'Space') return 'Space';
   if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'Num' + code.slice(6);
   if (code.startsWith('Arrow')) return code.slice(5);
   if (code === 'ShiftLeft' || code === 'ShiftRight') return 'Shift';
+  if (code === 'ControlLeft' || code === 'ControlRight') return 'Ctrl';
+  if (code === 'AltLeft' || code === 'AltRight') return 'Alt';
+  if (code === 'Backquote') return '`';
+  if (code === 'Minus') return '-';
+  if (code === 'Equal') return '=';
+  if (code === 'BracketLeft') return '[';
+  if (code === 'BracketRight') return ']';
   return code;
+}
+
+function getAbilityKeyLabel(abId) {
+  const jumpLbl = formatKeyCode(keybinds?.jump || 'Space').toUpperCase();
+  if (abId === 'skyGlide') return `HOLD ${jumpLbl}`;
+  if (abId === 'tripleJump') return `3x ${jumpLbl}`;
+  if (abId === 'shockwaveSlam') return formatKeyCode(keybinds?.ability1 || 'Digit1');
+  if (abId === 'aegisShield') return formatKeyCode(keybinds?.ability2 || 'Digit2');
+  if (abId === 'skyNova') return formatKeyCode(keybinds?.ability3 || 'Digit3');
+  return ABILITY_BY_ID[abId]?.keyLabel || '---';
 }
 
 let keybinds = (() => {
@@ -3040,7 +3063,7 @@ function updateControlsSummary() {
   } else {
     controlsSummary.innerHTML =
       `<b>Keyboard &amp; Mouse:</b> ${f(keybinds.forward)}/${f(keybinds.left)}/${f(keybinds.back)}/${f(keybinds.right)} Move &amp; Strafe · <b>Mouse:</b> 360° Aim (Click game to lock, <b>Esc/Tab</b> to free cursor)<br />` +
-      `<b>Left-Click / ${f(keybinds.attack)}:</b> Attack · <b>Right-Click / ${f(keybinds.dash)}:</b> Dash · <b>${f(keybinds.jump)}:</b> Jump/Glide · <b>1/2/3:</b> Abilities · <b>${f(keybinds.talk)}:</b> Talk · <b>J:</b> Quests<br />` +
+      `<b>Left-Click / ${f(keybinds.attack)}:</b> Attack · <b>Right-Click / ${f(keybinds.dash)}:</b> Dash · <b>${f(keybinds.jump)}:</b> Jump/Glide · <b>${f(keybinds.ability1)}/${f(keybinds.ability2)}/${f(keybinds.ability3)}:</b> Abilities · <b>${f(keybinds.talk)}:</b> Talk · <b>J:</b> Quests<br />` +
       `<b>Xbox / PlayStation Controller:</b> ${gpStatus}<br />` +
       `<b>Stats:</b> STR ${saveState.stats.str} · STA ${saveState.stats.sta} · SPD ${saveState.stats.spd} · Armor Lv${saveState.armorLevel}` +
       (saveState.guild ? ` · Guild [${saveState.guild.tag}]` : '');
@@ -3052,7 +3075,12 @@ function updateControlsSummary() {
 function renderBindGrid() {
   bindGrid.innerHTML = '';
   for (const [action, label] of ACTION_LABELS) {
-    const lbl = document.createElement('span'); lbl.textContent = label;
+    const lbl = document.createElement('span');
+    lbl.textContent = label;
+    if (action.startsWith('ability')) {
+      lbl.style.color = '#67e8f9';
+      lbl.style.fontWeight = '700';
+    }
     const btn = document.createElement('button');
     btn.className = 'bind-key' + (listeningAction === action ? ' listening' : '');
     btn.textContent = listeningAction === action ? 'PRESS KEY...' : formatKeyCode(keybinds[action]);
@@ -3278,9 +3306,9 @@ autoAimBtn?.addEventListener('click', () => {
 });
 keysBtn.addEventListener('click', () => showMenu('keys'));
 closeKeysBtn.addEventListener('click', () => { setOptionTab('controls'); showMenu('option'); });
-presetWasd.addEventListener('click', () => { keybinds = { ...PRESETS.wasd }; saveBinds(); updateControlsSummary(); renderBindGrid(); });
-presetArrows.addEventListener('click', () => { keybinds = { ...PRESETS.arrows }; saveBinds(); updateControlsSummary(); renderBindGrid(); });
-presetReset.addEventListener('click', () => { keybinds = { ...PRESETS.wasd }; saveBinds(); updateControlsSummary(); renderBindGrid(); });
+presetWasd.addEventListener('click', () => { keybinds = { ...PRESETS.wasd }; saveBinds(); updateControlsSummary(); updateAbilityBarUi(true); renderBindGrid(); });
+presetArrows.addEventListener('click', () => { keybinds = { ...PRESETS.arrows }; saveBinds(); updateControlsSummary(); updateAbilityBarUi(true); renderBindGrid(); });
+presetReset.addEventListener('click', () => { keybinds = { ...PRESETS.wasd }; saveBinds(); updateControlsSummary(); updateAbilityBarUi(true); renderBindGrid(); });
 
 // Visual Settings Controls
 let shadowsOn = true;
@@ -3536,12 +3564,13 @@ window.addEventListener('keydown', (e) => {
   const code = e.code;
   if (listeningAction) {
     e.preventDefault();
-    if (code !== 'Escape') { keybinds[listeningAction] = code; saveBinds(); updateControlsSummary(); }
+    if (code !== 'Escape') { keybinds[listeningAction] = code; saveBinds(); updateControlsSummary(); updateAbilityBarUi(true); }
     listeningAction = null;
     renderBindGrid();
     return;
   }
-  if (code === 'KeyJ' && started && !paused && !creatingCharacter) {
+  const isBoundAbilityKey = matchesBind(code, 'ability1') || matchesBind(code, 'ability2') || matchesBind(code, 'ability3');
+  if (code === 'KeyJ' && !isBoundAbilityKey && started && !paused && !creatingCharacter) {
     e.preventDefault();
     if (openMenu === 'quest') closeAllMenus();
     else showMenu('quest');
@@ -3586,9 +3615,9 @@ window.addEventListener('keydown', (e) => {
     if (matchesBind(code, 'swap')) cycleBagWeapon();
     if (matchesBind(code, 'talk') && nearbyNpc) { activeNpc = nearbyNpc; showMenu('npc'); }
     if (matchesBind(code, 'respawn')) player.respawn(false);
-    if (code === 'Digit1') player.triggerAbility('shockwaveSlam', combat);
-    if (code === 'Digit2') player.triggerAbility('aegisShield', combat);
-    if (code === 'Digit3') player.triggerAbility('skyNova', combat);
+    if (matchesBind(code, 'ability1')) player.triggerAbility('shockwaveSlam', combat);
+    if (matchesBind(code, 'ability2')) player.triggerAbility('aegisShield', combat);
+    if (matchesBind(code, 'ability3')) player.triggerAbility('skyNova', combat);
     if (code === 'Equal' || code === 'NumpadAdd') targetCamDist = Math.max(3.4, targetCamDist - 1.5);
     if (code === 'Minus' || code === 'NumpadSubtract') targetCamDist = Math.min(18.0, targetCamDist + 1.5);
   }
