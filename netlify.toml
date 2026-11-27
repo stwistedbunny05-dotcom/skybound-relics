@@ -1,13 +1,25 @@
+"$schema" = "https://open-api.netlify.com/netlify.schema.json"
+
 [build]
-  command = "mkdir -p dist && cp -r index.html manifest.json sw.js icon-192.png icon-512.png lib src dist/"
-  publish = "dist"
+  publish = "public"
+  environment = { NODE_VERSION = "24" }
 
-[build.environment]
-  NODE_VERSION = "24"
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
 
-[server]
-  size = "small"
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
 
-[server.scale]
-  min = 0
-  max = 1
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/admin.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    X-Robots-Tag = "noindex, nofollow"
