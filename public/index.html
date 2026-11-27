@@ -72,6 +72,28 @@
       border-color: #facc15; cursor: pointer; z-index: 16;
     }
 
+    /* Unlockable Hero Ability Quick-Cast Bar (Bottom-Right, 100% clear of Chatbox!) */
+    #abilityBar {
+      position: fixed; bottom: 14px; right: 52px;
+      display: flex; align-items: center; gap: 5px; z-index: 15; pointer-events: auto;
+    }
+    body.mode-buttons #abilityBar, body.mode-drag #abilityBar { bottom: 138px; right: 16px; }
+    .ab-slot {
+      min-width: 68px; padding: 4px 6px; text-align: center; cursor: pointer;
+      background: rgba(15, 23, 42, 0.92); border: 2px solid #64748b;
+      box-shadow: 3px 3px 0 #020617; color: #f8fafc; font-family: inherit;
+      position: relative; transition: transform 0.08s;
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+    }
+    .ab-slot:hover:not(:disabled) { transform: translateY(-2px); }
+    .ab-slot:disabled { opacity: 0.48; cursor: not-allowed; }
+    .ab-slot.active-glow { box-shadow: 0 0 12px #facc15, 3px 3px 0 #020617; border-color: #facc15; }
+    .ab-slot.passive-pill { min-width: 62px; cursor: default; opacity: 0.94; padding: 4px 6px; }
+    .ab-img { width: 32px; height: 32px; border-radius: 4px; display: block; object-fit: cover; image-rendering: pixelated; border: 1px solid rgba(255,255,255,0.22); }
+    .ab-key { font-size: 9px; font-weight: 900; opacity: 0.9; letter-spacing: 0.4px; }
+    .ab-name { font-size: 9px; font-weight: 900; white-space: nowrap; }
+    .ab-cd { font-size: 9px; font-weight: 800; color: #94a3b8; }
+
     /* Collapsible RPG Chatbox (Bottom-Left) */
     #chatWrap {
       position: fixed; bottom: 12px; left: 12px; width: 295px; max-width: calc(100vw - 24px);
@@ -365,6 +387,9 @@
   <!-- Clickable Talk-to-NPC Prompt (when near Safe Haven NPCs) -->
   <button id="npcPrompt" class="pixel-box hidden"></button>
 
+  <!-- Hero Unlockable Ability Bar (Passive Wings/3x Jump + Active Skill Hotkeys [1][2][3]) -->
+  <div id="abilityBar" class="hidden"></div>
+
   <!-- Collapsible RPG Chatbox (World / Guild / System) -->
   <div id="chatWrap" class="pixel-box hidden">
     <div class="chat-header">
@@ -400,11 +425,11 @@
   <div id="startOverlay" class="overlay">
     <div class="title-screen">
       <h1>SKYBOUND RELICS</h1>
-      <div style="color:#67e8f9; font-size:12px; font-weight:800; letter-spacing:2px; margin:-6px 0 12px; text-shadow:0 2px 6px #020617;">VERSION 4.7</div>
+      <div style="color:#67e8f9; font-size:12px; font-weight:800; letter-spacing:2px; margin:-6px 0 12px; text-shadow:0 2px 6px #020617;">VERSION 4.15</div>
       <button id="startBtn" class="play-cta">START</button>
     </div>
   </div>
-  <div id="verTag" style="position:fixed; right:8px; bottom:6px; z-index:9; font-size:10px; font-weight:800; color:#94a3b8; background:rgba(2,6,23,0.65); padding:2px 6px; border:1px solid rgba(148,163,184,0.35); pointer-events:none;">v4.7</div>
+  <div id="verTag" style="position:fixed; right:8px; bottom:6px; z-index:9; font-size:10px; font-weight:800; color:#94a3b8; background:rgba(2,6,23,0.65); padding:2px 6px; border:1px solid rgba(148,163,184,0.35); pointer-events:none;">v4.15</div>
 
   <!-- Organized 4-Tab OPTION Settings Menu (GAME / CONTROLS / VISUAL / AUDIO) -->
   <div id="optionOverlay" class="overlay hidden">
@@ -502,22 +527,19 @@
         • <b>Hearts &amp; 1UP Heart Stones:</b> Toggle <b>Auto Heart Regen (+1 ♥ every 15s)</b> anytime inside <b>OPTION → GAME</b>, or grab glowing <b>1UP ♥ Heart Stones</b> placed across islands!
       </div>
       <div class="controls-box">
-        <span class="section-lbl">2. CONTROLS (KEYBOARD &amp; MOUSE · CONTROLLER · MOBILE)</span>
-        • <b>Keyboard &amp; Mouse:</b> Click the game to aim with <b>360° Mouse Look</b> (<b>Esc</b> or <b>Tab</b> frees your cursor for menus). <b>W/A/S/D</b> Move &amp; Strafe · <b>Left-Click / F</b> Attack · <b>Right-Click / Shift</b> Directional Dash · <b>Space</b> Jump / Double-Jump · <b>T</b> Talk to NPC · <b>J</b> Quest Log · <b>Scroll</b> Zoom.<br />
-        • <b>Custom Button Placement:</b> Customize touch button positions anytime in <b>OPTION → CONTROLS → EDIT BUTTON LAYOUT</b>!<br />
-        • <b>Xbox / PlayStation Controller:</b> Plug-and-play (Left Stick Move · Right Stick Cam · <b>A/✕</b> Jump · <b>X/□/RT</b> Attack · <b>B/○</b> Dash). Switch control modes anytime in <b>OPTION → CONTROLS</b>.
+        <span class="section-lbl">2. CONTROLS, ABILITIES (1 / 2 / 3) &amp; SEAMLESS CHAT</span>
+        • <b>Keyboard &amp; Mouse:</b> <b>W/A/S/D</b> Move · <b>Left-Click / F</b> Attack · <b>Right-Click / Shift</b> Dash · <b>Space</b> Jump / Triple-Jump / <b>Hold in midair to Sky Glide</b> · <b>1 / 2 / 3</b> Hero Abilities · <b>T</b> Talk/Invite NPC · <b>Enter</b> Chat (keep typing without re-clicking, <b>Esc</b> to play).<br />
+        • <b>Xbox / PS5 Controller:</b> Plug-and-play (Left Stick Move · Right Stick Cam · <b>A/✕</b> Jump/Glide · <b>X/□/RT/R2</b> Attack · <b>B/○</b> Dash · <b>LT/L2</b> Slam · <b>L1+R1</b> Shield · <b>L3+R3</b> Sky Nova).
       </div>
       <div class="controls-box">
-        <span class="section-lbl">3. LOOT, 15-SLOT STASH &amp; UPGRADE STORE</span>
-        • Enemies drop <b>Credit Coins</b> and <i>rarely</i> drop weapons. Picked-up weapons go straight to your <b>15-Slot Stash</b> (your equipped weapon never switches automatically!).<br />
-        • Open <b>STORE</b> anytime to buy Knives, Daggers, Bows, <b>Elemental Arrows</b>, Spears, Swords &amp; Battle Axes, upgrade Weapons &amp; 3D Armor up to <b>Lv 6 Mythic Glow</b>, or sell extra Stash items.<br />
-        • Look for <b>Hidden Golden Chests</b> every 25th level &amp; the Merchant Store every 10th level!
+        <span class="section-lbl">3. HERO ABILITIES, MAX LIFE (3→6 ♥) &amp; STORE</span>
+        • <b>5 Hero Abilities</b> auto-unlock FREE as you rank up (Lv 5–40) and can be enhanced up to <b>Lv 9 MAX</b> as you unlock <b>MEDIUM &amp; HARD</b> difficulty!<br />
+        • Upgrade your <b>Max Life Hearts (3 ♥ → 6 ♥)</b> with live <b>HP%</b>, Weapons &amp; 3D Armor Glow in <b>STORE → UPGRADES</b>. Rare Boss Weapons drop exclusively from Warden Bosses!
       </div>
       <div class="controls-box">
-        <span class="section-lbl">4. CLOUD SAFE HAVEN, GUILDS (100 MEMBERS) &amp; SKY ARENA</span>
-        • Talk to Safe Haven NPCs (<b>Elder Rowan, Merchant Mira, Blacksmith Torin, Guild Master Kael, Champion Rex</b>) to unlock Story Quests &amp; rewards.<br />
-        • Create or join a <b>Guild (up to 100 members)</b> for permanent buffs — <b>Warning:</b> Guild Hard Mode makes enemies tougher &amp; smarter, with bonus Arena rewards!<br />
-        • Click <b>ARENA</b> (or enter the center portal) to battle tactical <b>AI NPC Challengers</b> across 4 Tiers!
+        <span class="section-lbl">4. SAFE HAVEN PARTY INVITES, SPARRING &amp; LINKING DEVICES</span>
+        • Walk up to roaming Safe Haven Explorers and press <b>T</b> to <b>INVITE TO PARTY</b> — they join you across all 4 Sky Worlds &amp; Duel Arena! Or hit them to start a friendly spar!<br />
+        • <b>Play on Another Device:</b> Open <b>OPTION → SAVE / LINK DEVICE</b> anytime and enter your <b>Hero Name or Game Account ID (SKY-XXXXXX)</b> to sync your account across phone, tablet, and PC!
       </div>
       <button id="closeTutorialBtn" class="play-cta" style="padding:10px 26px; font-size:14px;">GOT IT — LET'S PLAY! &rarr;</button>
     </div>
@@ -577,12 +599,21 @@
           <button id="randomNameBtn" class="pixel-box ctrl-btn" type="button" title="Random Name">RANDOM</button>
         </div>
       </div>
+      <div class="avatar-section"><label>CHARACTER GENDER</label><div id="avGenderRow" class="swatch-row"></div></div>
       <div class="avatar-section"><label>SKIN COLOR</label><div id="avSkinRow" class="swatch-row"></div></div>
       <div class="avatar-section"><label>FACE EMOTION</label><div id="avEmotionRow" class="swatch-row"></div></div>
       <div class="avatar-section"><label>HAIR STYLE</label><div id="avHairStyleRow" class="swatch-row"></div></div>
-      <div class="avatar-section"><label>HAIR &amp; BEARD COLOR</label><div id="avHairColorRow" class="swatch-row"></div></div>
-      <div class="avatar-section"><label>BEARD / FACIAL HAIR</label><div id="avBeardRow" class="swatch-row"></div></div>
+      <div class="avatar-section"><label id="avHairColorLbl">HAIR &amp; BEARD COLOR</label><div id="avHairColorRow" class="swatch-row"></div></div>
+      <div class="avatar-section" id="avBeardSection"><label>BEARD / FACIAL HAIR</label><div id="avBeardRow" class="swatch-row"></div></div>
       <div class="avatar-section"><label>FREE CLOTHING OUTFIT</label><div id="avOutfitRow" class="swatch-row"></div></div>
+      <div class="avatar-section" style="border-top:1px solid #334155; padding-top:8px; margin-top:8px;">
+        <label style="color:#67e8f9;">ALREADY HAVE AN ACCOUNT? LINK THIS DEVICE</label>
+        <div style="display:flex; gap:6px;">
+          <input id="linkDeviceAvatarInput" class="txt-input" style="flex:1; min-width:120px;" maxlength="20" placeholder="Hero Name or SKY-XXXXXX..." />
+          <button id="linkDeviceAvatarBtn" class="pixel-box ctrl-btn" type="button" style="border-color:#38bdf8;color:#67e8f9;">LINK</button>
+        </div>
+        <div id="linkDeviceAvatarMsg" style="font-size:10px; color:#94a3b8; margin-top:4px;">Enter your Hero Name or Game Account ID to load your saved hero on this device.</div>
+      </div>
       <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-top:12px;">
         <button id="rotAvLeftBtn" class="pixel-box ctrl-btn">&larr; TURN</button>
         <button id="rotAvRightBtn" class="pixel-box ctrl-btn">TURN &rarr;</button>
@@ -658,8 +689,16 @@
   <!-- Save / Load Modal -->
   <div id="saveOverlay" class="overlay hidden">
     <div class="pixel-box modal">
-      <h1>SAVE GAME</h1>
-      <p id="saveStatus">Progress auto-saves locally on level clears, chests, quests, and upgrades.</p>
+      <h1>SAVE &amp; LINK DEVICE</h1>
+      <p id="saveStatus">Progress auto-saves locally &amp; syncs online using your Hero Name and Game Account ID.</p>
+      <div class="controls-box" style="margin:6px 0 10px; text-align:left;">
+        <span class="section-lbl" style="color:#67e8f9;">LINK ACCOUNT TO THIS DEVICE (HERO NAME OR GAME ACCOUNT ID)</span>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+          <input id="linkDeviceSaveInput" class="txt-input" style="flex:1; min-width:150px;" maxlength="20" placeholder="Enter Hero Name or SKY-XXXXXX..." />
+          <button id="linkDeviceSaveBtn" class="play-cta" type="button" style="padding:7px 14px; font-size:12px;">LINK ACCOUNT</button>
+        </div>
+        <div id="linkDeviceSaveMsg" style="font-size:10px; color:#94a3b8; margin-top:5px;">Syncs your saved Credits, Weapons, Abilities, Rank &amp; Hero from another phone or PC!</div>
+      </div>
       <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:10px 0;">
         <button id="saveNowBtn" class="play-cta" style="padding:8px 18px; font-size:13px;">SAVE NOW</button>
         <button id="exportSaveBtn" class="pixel-box ctrl-btn">COPY CODE</button>
@@ -710,6 +749,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=4.9"></script>
+  <script type="module" src="./src/main.js?v=4.15"></script>
 </body>
 </html>

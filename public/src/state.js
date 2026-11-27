@@ -371,6 +371,10 @@ export function getQuestProgress(state, q) {
 }
 
 export const AVATAR_OPTIONS = {
+  gender: [
+    { id: 'male',   name: 'Male' },
+    { id: 'female', name: 'Female' },
+  ],
   skin: [
     { id: 'peach', name: 'Peach', hex: '#ffd1a9' },
     { id: 'fair',  name: 'Fair',  hex: '#ffe4cc' },
@@ -387,6 +391,14 @@ export const AVATAR_OPTIONS = {
     { id: 'mohawk', name: 'Mohawk' },
     { id: 'bald',   name: 'None' },
   ],
+  femaleHairStyle: [
+    { id: 'ponytail',  name: 'High Ponytail' },
+    { id: 'twintails', name: 'Twin Tails' },
+    { id: 'hat',       name: 'Hat + Locks' },
+    { id: 'long',      name: 'Long Flowing' },
+    { id: 'bob',       name: 'Sleek Bob' },
+    { id: 'tiara',     name: 'Tiara + Bun' },
+  ],
   hairColor: [
     { id: 'brown',  name: 'Brown',  hex: '#5c3a21' },
     { id: 'black',  name: 'Black',  hex: '#1e1b24' },
@@ -395,6 +407,7 @@ export const AVATAR_OPTIONS = {
     { id: 'silver', name: 'Silver', hex: '#cbd5e1' },
     { id: 'cyan',   name: 'Cyan',   hex: '#38bdf8' },
     { id: 'violet', name: 'Violet', hex: '#a855f7' },
+    { id: 'rose',   name: 'Rose',   hex: '#f472b6' },
   ],
   beard: [
     { id: 'none',     name: 'None' },
@@ -463,9 +476,13 @@ export function createDefaultSave() {
     arrowsOwned: { wood: true, iron: false, fire: false, lightning: false },
     equippedArrow: 'wood',
     armorLevel: 1,
+    maxHearts: 3, // Upgradable 3 -> 6 Hearts (with live HP% display!)
     stats: { str: 1, sta: 1, spd: 1 },
     abilities: { doubleJump: true, dash: true },
+    abilityLevels: { skyGlide: 1, tripleJump: 1, shockwaveSlam: 1, aegisShield: 1, skyNova: 1 },
+    partyIds: [], // Up to 2 invited Safe Haven AI Explorer Companions who fight with you across ALL worlds & Arena!
     avatar: {
+      gender: 'male',
       skin: 'peach',
       hairStyle: 'hat',
       hairColor: 'brown',
@@ -551,8 +568,11 @@ export function loadGameSave() {
       worldDifficultyMaxLevel: { ...base.worldDifficultyMaxLevel },
       bagSlots: slots,
       arrowsOwned: { ...base.arrowsOwned, ...(parsed.arrowsOwned || {}) },
+      maxHearts: Math.max(3, Math.min(6, Number(parsed.maxHearts) || 3)),
       stats: { ...base.stats, ...(parsed.stats || {}) },
       abilities: { ...base.abilities, ...(parsed.abilities || {}) },
+      abilityLevels: { ...base.abilityLevels, ...(parsed.abilityLevels || {}) },
+      partyIds: Array.isArray(parsed.partyIds) ? parsed.partyIds.slice(0, 2) : [],
       avatar: { ...base.avatar, ...(parsed.avatar || {}) },
       openedChests: { ...(parsed.openedChests || {}) },
       quests: {
@@ -663,7 +683,144 @@ export function getStatUpgradeReqLevel(nextLvl) {
   return STAT_UPGRADE_REQ_LEVELS[nextLvl] || 1;
 }
 
+// Required Player Stage Level to upgrade Max Hearts (3 -> 4 -> 5 -> 6 MAX!)
+export const HEART_UPGRADE_REQ_LEVELS = { 4: 10, 5: 25, 6: 50 };
+export const HEART_UPGRADE_COSTS = { 4: 180, 5: 380, 6: 750 };
+export function getHeartUpgradeReqLevel(nextHearts) {
+  return HEART_UPGRADE_REQ_LEVELS[nextHearts] || 1;
+}
+export function getHeartUpgradeCost(nextHearts) {
+  return HEART_UPGRADE_COSTS[nextHearts] || 180;
+}
+export function getPlayerMaxHearts(state) {
+  return Math.max(3, Math.min(6, Number(state?.maxHearts) || 3));
+}
+
 export function addCredits(state, amount) {
   state.credits = Math.max(0, Math.floor((state.credits || 0) + amount));
   return state.credits;
+}
+
+// =========================================================================
+// UNLOCKABLE HERO ABILITIES (Option A: Free auto-unlock at Rank Milestones!)
+// Enhanceable up to Difficulty Tier Cap across ALL worlds:
+// EASY -> Lv 1..3 | MEDIUM -> Lv 4..6 | HARD -> Lv 7..9 (MAX)
+// =========================================================================
+export const ABILITY_CATALOG = [
+  {
+    id: 'skyGlide', name: 'Sky Glide', short: 'GLIDE', type: 'passive', reqLevel: 5,
+    keyLabel: 'HOLD JUMP', padLabel: 'HOLD A/✕', color: '#38bdf8', icon: '🪽',
+    iconImg: './assets/abilities/sky-glide.png',
+    desc: 'Hold Jump in midair to deploy glowing Sky Wings & glide smoothly across gaps.',
+  },
+  {
+    id: 'tripleJump', name: 'Triple Jump', short: '3X JUMP', type: 'passive', reqLevel: 10,
+    keyLabel: '3x JUMP', padLabel: '3x A/✕', color: '#34d399', icon: '⬆',
+    iconImg: './assets/abilities/triple-jump.png',
+    desc: 'Grants a 3rd midair Sky Leap with a golden wind ring burst (+shock push at Lv5+).',
+  },
+  {
+    id: 'shockwaveSlam', name: 'Shockwave Slam', short: 'SLAM', type: 'active', reqLevel: 15,
+    keyLabel: '1', padLabel: 'LT/L2', color: '#f97316', icon: '💥',
+    iconImg: './assets/abilities/shockwave-slam.png',
+    desc: 'Unleashes an expanding 3D shockwave ring dealing heavy AOE damage & knockback.',
+  },
+  {
+    id: 'aegisShield', name: 'Aegis Shield', short: 'SHIELD', type: 'active', reqLevel: 25,
+    keyLabel: '2', padLabel: 'L1+R1', color: '#facc15', icon: '🛡',
+    iconImg: './assets/abilities/aegis-shield.png',
+    desc: 'Summons a glowing golden barrier blocking hits, arrows, spikes & magma (+Thorns Lv6+).',
+  },
+  {
+    id: 'skyNova', name: 'Sky Lightning Nova', short: 'NOVA', type: 'active', reqLevel: 40,
+    keyLabel: '3', padLabel: 'L3+R3', color: '#c084fc', icon: '⚡',
+    iconImg: './assets/abilities/sky-nova.png',
+    desc: 'Calls down 3D sky lightning pillars on nearby enemies & bosses for massive burst + stun.',
+  },
+];
+
+export const ABILITY_BY_ID = Object.fromEntries(ABILITY_CATALOG.map((a) => [a.id, a]));
+
+export function getHighestUnlockedDifficultyTier(state) {
+  if (!state) return 0;
+  if (state.previewAll) return 2;
+  let best = 0;
+  for (const wId of WORLD_ORDER) {
+    const t = Math.max(
+      state.worldDifficultyUnlocked?.[wId] || 0,
+      state.completedWorlds?.[wId] ? 1 : 0
+    );
+    if (t > best) best = t;
+  }
+  return Math.max(0, Math.min(2, best));
+}
+
+export function getAbilityMaxLevelForState(state) {
+  return (getHighestUnlockedDifficultyTier(state) + 1) * 3; // EASY=3, MEDIUM=6, HARD=9
+}
+
+export function isAbilityUnlocked(state, abilityId) {
+  const def = ABILITY_BY_ID[abilityId];
+  if (!def) return false;
+  if (state?.previewAll) return true;
+  return getPlayerProgressLevel(state) >= def.reqLevel;
+}
+
+export function getAbilityLevel(state, abilityId) {
+  if (!isAbilityUnlocked(state, abilityId)) return 0;
+  return Math.max(1, Math.min(9, state?.abilityLevels?.[abilityId] || 1));
+}
+
+export function getAbilityUpgradeCost(currentLvl) {
+  return Math.round(80 * Math.pow(1.42, Math.max(0, (currentLvl || 1) - 1)));
+}
+
+export function getAbilityStats(state, abilityId, overrideLvl = null) {
+  const lvl = overrideLvl !== null ? Math.max(1, Math.min(9, overrideLvl)) : Math.max(1, getAbilityLevel(state, abilityId) || 1);
+  if (abilityId === 'skyGlide') {
+    return {
+      lvl,
+      fallSpeed: +(3.6 - (lvl - 1) * 0.25).toFixed(2),
+      speedBoost: +(1.10 + (lvl - 1) * 0.045).toFixed(2),
+      wingScale: +(0.90 + (lvl - 1) * 0.07).toFixed(2),
+      summary: `Fall -${(3.6 - (lvl - 1) * 0.25).toFixed(1)}m/s · +${Math.round((0.10 + (lvl - 1) * 0.045) * 100)}% Glide Speed`,
+    };
+  }
+  if (abilityId === 'tripleJump') {
+    const knockR = lvl >= 5 ? +(3.8 + (lvl - 5) * 0.65).toFixed(1) : 0;
+    return {
+      lvl,
+      jumpVel: +(11.4 + (lvl - 1) * 0.42).toFixed(2),
+      knockRadius: knockR,
+      summary: `3rd Leap ${(11.4 + (lvl - 1) * 0.42).toFixed(1)}m/s${knockR > 0 ? ` · ${knockR}m Wind Push` : ''}`,
+    };
+  }
+  if (abilityId === 'shockwaveSlam') {
+    const dmgMult = +(1.8 + (lvl - 1) * 0.30).toFixed(2);
+    const radius = +(5.5 + (lvl - 1) * 0.50).toFixed(1);
+    const cooldown = +(8.0 - (lvl - 1) * 0.40).toFixed(1);
+    return {
+      lvl, dmgMult, radius, cooldown,
+      knock: +(2.6 + (lvl - 1) * 0.25).toFixed(2),
+      summary: `${dmgMult}x DMG · ${radius}m Radius · ${cooldown}s CD`,
+    };
+  }
+  if (abilityId === 'aegisShield') {
+    const duration = +(4.0 + (lvl - 1) * 0.40).toFixed(1);
+    const cooldown = +(15.0 - (lvl - 1) * 0.68).toFixed(1);
+    const thornsMult = lvl >= 6 ? +(0.85 + (lvl - 6) * 0.35).toFixed(2) : 0;
+    return {
+      lvl, duration, cooldown, thornsMult,
+      summary: `${duration}s Shield · ${cooldown}s CD${thornsMult > 0 ? ` · ${thornsMult}x Thorns` : ''}`,
+    };
+  }
+  const dmgMult = +(2.8 + (lvl - 1) * 0.45).toFixed(2);
+  const targets = Math.min(8, 4 + Math.floor(lvl / 2));
+  const stunSec = +(1.2 + (lvl - 1) * 0.15).toFixed(2);
+  const radius = +(11.0 + (lvl - 1) * 0.85).toFixed(1);
+  const cooldown = +(22.0 - (lvl - 1) * 1.05).toFixed(1);
+  return {
+    lvl, dmgMult, targets, stunSec, radius, cooldown,
+    summary: `${dmgMult}x DMG · ${targets} Bolts · ${stunSec.toFixed(1)}s Stun · ${cooldown}s CD`,
+  };
 }

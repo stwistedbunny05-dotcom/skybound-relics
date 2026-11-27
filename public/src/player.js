@@ -1,10 +1,12 @@
 import * as THREE from '../lib/three.module.min.js';
 import { audio } from './audio.js';
-import { WEAPON_CATALOG, AVATAR_OPTIONS, getGlowTier, getEquippedItem } from './state.js';
+import { WEAPON_CATALOG, AVATAR_OPTIONS, getGlowTier, getEquippedItem, isAbilityUnlocked, getAbilityStats, getPlayerMaxHearts } from './state.js';
 import { buildWeaponMesh } from './combat.js';
 import { makeCharacterTextures } from './textures.js';
+import { makeAdditiveVfxMaterial } from './vfxAssets.js';
 
-function makePixelFaceTexture(skinHex, hairHex, emotion, beard) {
+function makePixelFaceTexture(skinHex, hairHex, emotion, beard, gender = 'male') {
+  const isFemale = gender === 'female';
   const c = document.createElement('canvas');
   c.width = 32;
   c.height = 32;
@@ -20,8 +22,8 @@ function makePixelFaceTexture(skinHex, hairHex, emotion, beard) {
   ctx.fillRect(0, 28, 32, 4);
   ctx.fillRect(0, 0, 2, 32); ctx.fillRect(30, 0, 2, 32);
   // Warm cheek blush & subtle nose bridge
-  ctx.fillStyle = 'rgba(244,63,94,0.16)';
-  ctx.fillRect(4, 18, 5, 3); ctx.fillRect(23, 18, 5, 3);
+  ctx.fillStyle = isFemale ? 'rgba(244,63,94,0.28)' : 'rgba(244,63,94,0.16)';
+  ctx.fillRect(3, 18, 6, 3); ctx.fillRect(23, 18, 6, 3);
   ctx.fillStyle = 'rgba(0,0,0,0.09)';
   ctx.fillRect(15, 16, 2, 4);
 
@@ -33,62 +35,81 @@ function makePixelFaceTexture(skinHex, hairHex, emotion, beard) {
     ctx.fillRect(6, 12, 4, 2); ctx.fillRect(20, 12, 4, 2);
     ctx.fillStyle = '#e0f2fe';
     ctx.fillRect(6, 11, 2, 1); ctx.fillRect(20, 11, 2, 1);
-    ctx.fillStyle = '#3b1f16';
-    ctx.fillRect(12, 22, 8, 2); ctx.fillRect(20, 20, 2, 2);
+    ctx.fillStyle = isFemale ? '#e11d48' : '#3b1f16';
+    ctx.fillRect(12, 22, 8, 2);
+    if (isFemale) { ctx.fillStyle = '#fda4af'; ctx.fillRect(14, 23, 4, 1); }
+    else ctx.fillRect(20, 20, 2, 2);
   } else {
     // Crisp White Sclera + Deep Iris + Dual Specular Sparkles!
     if (emotion === 'wink') {
       ctx.fillStyle = '#ffffff'; ctx.fillRect(6, 12, 6, 6);
       ctx.fillStyle = '#0f172a'; ctx.fillRect(8, 12, 4, 6);
+      if (isFemale) { ctx.fillStyle = '#38bdf8'; ctx.fillRect(8, 16, 4, 2); }
       ctx.fillStyle = '#ffffff'; ctx.fillRect(8, 13, 2, 2);
       ctx.fillStyle = '#0f172a'; ctx.fillRect(20, 15, 6, 2);
+      if (isFemale) {
+        ctx.fillRect(4, 11, 8, 2); ctx.fillRect(3, 10, 2, 2);
+        ctx.fillRect(26, 14, 2, 2);
+      }
     } else {
       const ey = emotion === 'surprised' ? 10 : 12;
       ctx.fillStyle = '#ffffff'; ctx.fillRect(6, ey, 6, 6); ctx.fillRect(20, ey, 6, 6);
       ctx.fillStyle = '#0f172a'; ctx.fillRect(8, ey, 4, 6); ctx.fillRect(20, ey, 4, 6);
       ctx.fillStyle = '#38bdf8'; ctx.fillRect(8, ey + 4, 4, 2); ctx.fillRect(20, ey + 4, 4, 2);
       ctx.fillStyle = '#ffffff'; ctx.fillRect(8, ey + 1, 2, 2); ctx.fillRect(20, ey + 1, 2, 2);
+      if (isFemale) {
+        // Winged upper eyelashes!
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(4, ey - 1, 8, 2); ctx.fillRect(3, ey - 2, 2, 2);
+        ctx.fillRect(20, ey - 1, 8, 2); ctx.fillRect(27, ey - 2, 2, 2);
+      }
     }
 
     // Expressive Eyebrows
     ctx.fillStyle = hairHex;
+    const browH = isFemale ? 1 : 2;
     if (emotion === 'determined') {
-      ctx.fillRect(5, 9, 7, 2); ctx.fillRect(20, 9, 7, 2);
+      ctx.fillRect(5, 9, 7, browH); ctx.fillRect(20, 9, 7, browH);
     } else if (emotion === 'fierce') {
-      ctx.fillRect(5, 8, 4, 2); ctx.fillRect(9, 10, 4, 2);
-      ctx.fillRect(23, 8, 4, 2); ctx.fillRect(19, 10, 4, 2);
+      ctx.fillRect(5, 8, 4, browH); ctx.fillRect(9, 10, 4, 2);
+      ctx.fillRect(23, 8, 4, browH); ctx.fillRect(19, 10, 4, 2);
     } else {
-      ctx.fillRect(6, 9, 6, 2); ctx.fillRect(20, 9, 6, 2);
+      ctx.fillRect(6, isFemale ? 8 : 9, 6, browH); ctx.fillRect(20, isFemale ? 8 : 9, 6, browH);
     }
 
     // Mouth
-    ctx.fillStyle = '#5c1f24';
+    ctx.fillStyle = isFemale ? '#e11d48' : '#5c1f24';
     if (emotion === 'happy' || emotion === 'wink') {
       ctx.fillRect(10, 22, 2, 2); ctx.fillRect(12, 24, 8, 2); ctx.fillRect(20, 22, 2, 2);
+      if (isFemale) { ctx.fillStyle = '#fda4af'; ctx.fillRect(14, 24, 4, 1); }
     } else if (emotion === 'surprised') {
       ctx.fillRect(14, 22, 4, 4);
+      if (isFemale) { ctx.fillStyle = '#fda4af'; ctx.fillRect(15, 23, 2, 2); }
     } else if (emotion === 'fierce') {
       ctx.fillRect(10, 24, 12, 2);
       ctx.fillStyle = '#ffffff'; ctx.fillRect(12, 22, 8, 2);
     } else {
       ctx.fillRect(12, 23, 8, 2);
+      if (isFemale) { ctx.fillStyle = '#fda4af'; ctx.fillRect(14, 23, 4, 1); }
     }
   }
 
-  // Facial Hair / Beard (32x32 crisp shading)
-  ctx.fillStyle = hairHex;
-  if (beard === 'stubble') {
-    ctx.fillStyle = 'rgba(20, 20, 20, 0.30)';
-    for (let x = 4; x < 28; x += 3) {
-      ctx.fillRect(x, 26, 2, 2); ctx.fillRect(x + 1, 29, 2, 2);
+  // Facial Hair / Beard (Male ONLY — strictly omitted for Female characters!)
+  if (!isFemale) {
+    ctx.fillStyle = hairHex;
+    if (beard === 'stubble') {
+      ctx.fillStyle = 'rgba(20, 20, 20, 0.30)';
+      for (let x = 4; x < 28; x += 3) {
+        ctx.fillRect(x, 26, 2, 2); ctx.fillRect(x + 1, 29, 2, 2);
+      }
+    } else if (beard === 'mustache') {
+      ctx.fillRect(10, 20, 12, 2); ctx.fillRect(8, 22, 4, 2); ctx.fillRect(20, 22, 4, 2);
+    } else if (beard === 'goatee') {
+      ctx.fillRect(12, 26, 8, 6); ctx.fillRect(10, 20, 12, 2);
+    } else if (beard === 'full') {
+      ctx.fillRect(4, 22, 4, 10); ctx.fillRect(24, 22, 4, 10);
+      ctx.fillRect(6, 26, 20, 6); ctx.fillRect(10, 20, 12, 2);
     }
-  } else if (beard === 'mustache') {
-    ctx.fillRect(10, 20, 12, 2); ctx.fillRect(8, 22, 4, 2); ctx.fillRect(20, 22, 4, 2);
-  } else if (beard === 'goatee') {
-    ctx.fillRect(12, 26, 8, 6); ctx.fillRect(10, 20, 12, 2);
-  } else if (beard === 'full') {
-    ctx.fillRect(4, 22, 4, 10); ctx.fillRect(24, 22, 4, 10);
-    ctx.fillRect(6, 26, 20, 6); ctx.fillRect(10, 20, 12, 2);
   }
 
   const tex = new THREE.CanvasTexture(c);
@@ -113,9 +134,9 @@ export class VoxelPlayer {
     this.dashSpeed = 24.0;
     this.dashDuration = 0.25;
 
-    // 3 Base Hearts + Armor Shield pips from Armor upgrades + 15s Auto Heart Regen
-    this.maxHp = 3;
-    this.hp = 3;
+    // Upgradable Base Hearts (3 -> 6 Hearts + live HP%) + Armor Shield pips + 15s Auto Heart Regen
+    this.maxHp = getPlayerMaxHearts(saveState);
+    this.hp = this.maxHp;
     this.armorShield = 0;
     this.maxArmorShield = 0;
     this.heartRegenInterval = 15.0;
@@ -136,6 +157,10 @@ export class VoxelPlayer {
     this.coyoteTimer = 0;
     this.jumpBufferTimer = 0;
     this.canDoubleJump = false;
+    this.canTripleJump = false;
+    this.isGliding = false;
+    this.aegisTimer = 0;
+    this.abilityCooldowns = { shockwaveSlam: 0, aegisShield: 0, skyNova: 0 };
     this.dashTimer = 0;
     this.dashCooldown = 0;
     this.dashDir = new THREE.Vector3(0, 0, -1);
@@ -163,13 +188,19 @@ export class VoxelPlayer {
   }
 
   getNearbyNpc() {
-    if (!this.world?.friendlyNpcs?.length) return null;
+    if (!this.world) return null;
     const center = this.pos.clone().add(new THREE.Vector3(0, 0.8, 0));
     let best = null;
     let bestD = 4.2;
-    for (const npc of this.world.friendlyNpcs) {
+    for (const npc of this.world.friendlyNpcs || []) {
       const d = center.distanceTo(npc.pos);
       if (d < bestD) { bestD = d; best = npc; }
+    }
+    // Also detect nearby peaceful Roaming AI Explorers so you can invite them to your Party!
+    for (const ai of this.world.roamingAi || []) {
+      if (ai.hostile || ai.defeatedTimer > 0) continue;
+      const d = center.distanceTo(ai.pos.clone().add(new THREE.Vector3(0, 0.8, 0)));
+      if (d < bestD) { bestD = d; best = ai; }
     }
     return best;
   }
@@ -240,13 +271,122 @@ export class VoxelPlayer {
     this.armorSlot = new THREE.Group();
     this.auraRing = null;
 
-    this.group.add(this.leftLeg, this.rightLeg, this.torso, this.cape, this.leftArm, this.rightArm, this.head, this.armorSlot);
-    this.group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    // 3D Sculpted Multi-Feather Glowing Sky Wings (visible while Sky Gliding!)
+    this.skyWingsGroup = new THREE.Group();
+    this.skyWingsGroup.position.set(0, 0.92, -0.24);
+    this.skyWingsGroup.visible = false;
+    const wingMatOuter = new THREE.MeshBasicMaterial({ color: 0x0ea5e9, transparent: true, opacity: 0.90 });
+    const wingMatMid = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.92 });
+    const wingMatGold = new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.95 });
+    const wingMatTip = new THREE.MeshBasicMaterial({ color: 0xe0f2fe, transparent: true, opacity: 0.96 });
+    // Central gilded back-harness clasp + sky sapphire gem
+    const harness = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.24, 0.10), wingMatGold);
+    const harnessGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 0), wingMatTip);
+    harnessGem.position.set(0, 0, -0.06);
+    this.skyWingsGroup.add(harness, harnessGem);
+
+    this.wingLeft = new THREE.Group();
+    this.wingRight = new THREE.Group();
+    for (const [wg, dir] of [[this.wingLeft, -1], [this.wingRight, 1]]) {
+      // Golden upper wing-arm ridge
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.11, 0.08), wingMatGold);
+      arm.position.set(dir * 0.34, 0.22, -0.02); arm.rotation.z = dir * 0.34;
+      wg.add(arm);
+      // 5 Sculpted layered flight-feather plumes fanning gracefully outward!
+      const plumes = [
+        [0.86, 0.26, -0.06, 0.72, 0.17, 0.05, 0.28, wingMatTip],
+        [0.72, 0.11, -0.07, 0.96, 0.18, 0.05, 0.16, wingMatMid],
+        [0.58, -0.04, -0.08, 0.86, 0.17, 0.05, 0.05, wingMatOuter],
+        [0.44, -0.18, -0.09, 0.68, 0.15, 0.045, -0.08, wingMatGold],
+        [0.32, -0.31, -0.10, 0.48, 0.13, 0.04, -0.20, wingMatMid],
+      ];
+      for (const [px, py, pz, pw, ph, pd, rz, mat] of plumes) {
+        const f = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, pd), mat);
+        f.position.set(dir * px, py, pz);
+        f.rotation.z = dir * rz;
+        wg.add(f);
+      }
+    }
+    this.skyWingsGroup.add(this.wingLeft, this.wingRight);
+    // Custom Additive-Blending Glowing Sky Wings VFX Texture Aura Layer!
+    this.skyWingsVfxPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.55, 2.35),
+      makeAdditiveVfxMaterial('skyGlide', 0.94)
+    );
+    this.skyWingsVfxPlane.position.set(0, 0.02, -0.14);
+    this.skyWingsGroup.add(this.skyWingsVfxPlane);
+    this.glideTrailTimer = 0;
+
+    // 3D Sculpted Runic Paladin Aegis Shield Barrier + 4 Orbiting Golden Heater Shields!
+    this.aegisGroup = new THREE.Group();
+    this.aegisGroup.position.set(0, 0.85, 0);
+    this.aegisGroup.visible = false;
+    this.aegisSphere = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(1.12, 1),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15, wireframe: true, transparent: true, opacity: 0.52 })
+    );
+    this.aegisCore = new THREE.Mesh(
+      new THREE.SphereGeometry(1.06, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfef08a, transparent: true, opacity: 0.16, depthWrite: false })
+    );
+    this.aegisHalo = new THREE.Mesh(
+      new THREE.RingGeometry(0.98, 1.18, 24),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide, transparent: true, opacity: 0.82 })
+    );
+    this.aegisHalo.rotation.x = Math.PI / 2;
+    this.aegisHaloTop = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 0.72, 20),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.72 })
+    );
+    this.aegisHaloTop.rotation.x = Math.PI / 2;
+    this.aegisHaloTop.position.y = 0.82;
+
+    // 4 Sculpted Orbiting Paladin Heater Shield Plates with Glowing Sapphire Rune Cores!
+    this.aegisShieldRing = new THREE.Group();
+    const shGold = new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.90 });
+    const shFace = new THREE.MeshBasicMaterial({ color: 0xfef08a, transparent: true, opacity: 0.88 });
+    const shGem = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.96 });
+    for (let k = 0; k < 4; k++) {
+      const ang = (k / 4) * Math.PI * 2;
+      const plate = new THREE.Group();
+      plate.position.set(Math.cos(ang) * 1.14, 0.02, Math.sin(ang) * 1.14);
+      plate.rotation.y = -ang + Math.PI / 2;
+      const rim = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.54, 0.07), shGold);
+      const inner = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.42, 0.085), shFace);
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.16, 0.07), shGold);
+      tip.position.y = -0.30;
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.09, 0), shGem);
+      gem.position.z = 0.06;
+      plate.add(rim, inner, tip, gem);
+      this.aegisShieldRing.add(plate);
+    }
+    this.aegisGroup.add(this.aegisSphere, this.aegisCore, this.aegisHalo, this.aegisHaloTop, this.aegisShieldRing);
+    // Custom Additive-Blending Golden Paladin Sacred Rune Circle Ground VFX Decal!
+    this.aegisRuneDecal = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.2, 3.2),
+      makeAdditiveVfxMaterial('aegisShield', 0.96)
+    );
+    this.aegisRuneDecal.rotation.x = -Math.PI / 2;
+    this.aegisRuneDecal.position.y = -0.78;
+    this.aegisGroup.add(this.aegisRuneDecal);
+
+    // Female Flared Tunic Skirt Hem (visible when gender === 'female')
+    this.femaleSkirtGroup = new THREE.Group();
+    this.femaleSkirtGroup.visible = false;
+    const skirtMain = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.19, 0.38), this.mTunic);
+    skirtMain.position.set(0, 0.44, 0);
+    const skirtTrim = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.045, 0.40), new THREE.MeshLambertMaterial({ color: 0xfacc15 }));
+    skirtTrim.position.set(0, 0.34, 0);
+    this.femaleSkirtGroup.add(skirtMain, skirtTrim);
+
+    this.group.add(this.leftLeg, this.rightLeg, this.torso, this.femaleSkirtGroup, this.cape, this.leftArm, this.rightArm, this.head, this.armorSlot, this.skyWingsGroup, this.aegisGroup);
+    this.group.traverse((o) => { if (o.isMesh && !this.aegisGroup.children.includes(o) && o !== this.skyWingsVfxPlane && !this.aegisShieldRing.children.some((p) => p.children.includes(o))) o.castShadow = true; });
     this.scene.add(this.group);
   }
 
   refreshAvatarVisuals() {
     const av = this.saveState.avatar || {};
+    const isFemale = av.gender === 'female';
     const skinObj = AVATAR_OPTIONS.skin.find((s) => s.id === av.skin) || AVATAR_OPTIONS.skin[0];
     const hairColObj = AVATAR_OPTIONS.hairColor.find((h) => h.id === av.hairColor) || AVATAR_OPTIONS.hairColor[0];
     const outfitObj = AVATAR_OPTIONS.outfit.find((o) => o.id === av.outfit) || AVATAR_OPTIONS.outfit[0];
@@ -258,12 +398,18 @@ export class VoxelPlayer {
     this.mCape.color.setHex(0xffffff); this.mCape.map = cTex.capeTex; this.mCape.needsUpdate = true;
     this.mBoots.color.setHex(0xffffff); this.mBoots.map = cTex.bootTex; this.mBoots.needsUpdate = true;
 
-    // Update live 32x32 HD pixel face (emotion + beard)
+    // Sleeker Female Hero body silhouette + flared tunic hem!
+    if (this.torso) this.torso.scale.set(isFemale ? 0.88 : 1.0, 1.0, isFemale ? 0.88 : 1.0);
+    if (this.leftArm) { this.leftArm.scale.set(isFemale ? 0.86 : 1.0, 1.0, isFemale ? 0.86 : 1.0); this.leftArm.position.x = isFemale ? -0.34 : -0.37; }
+    if (this.rightArm) { this.rightArm.scale.set(isFemale ? 0.86 : 1.0, 1.0, isFemale ? 0.86 : 1.0); this.rightArm.position.x = isFemale ? 0.34 : 0.37; }
+    if (this.femaleSkirtGroup) this.femaleSkirtGroup.visible = isFemale;
+
+    // Update live 32x32 HD pixel face (emotion + gender + male-only beard)
     if (this.mFace.map) this.mFace.map.dispose();
-    this.mFace.map = makePixelFaceTexture(skinObj.hex, hairColObj.hex, av.emotion || 'happy', av.beard || 'none');
+    this.mFace.map = makePixelFaceTexture(skinObj.hex, hairColObj.hex, av.emotion || 'happy', isFemale ? 'none' : (av.beard || 'none'), isFemale ? 'female' : 'male');
     this.mFace.needsUpdate = true;
 
-    // Rebuild 3D Hair / Hat / 3D Beard Volume
+    // Rebuild 3D Hair / Hat / Tiara / Male-Only Beard Volume
     while (this.hairSlot.children.length > 0) {
       const c = this.hairSlot.children.pop();
       if (c.geometry) c.geometry.dispose();
@@ -271,7 +417,85 @@ export class VoxelPlayer {
     }
 
     const mHair = new THREE.MeshLambertMaterial({ color: hairColObj.hex });
-    const style = av.hairStyle || 'hat';
+    const mGoldTie = new THREE.MeshLambertMaterial({ color: 0xfacc15 });
+    const mGemBlue = new THREE.MeshLambertMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.45 });
+    const style = av.hairStyle || (isFemale ? 'ponytail' : 'hat');
+
+    if (isFemale) {
+      // Sculpted Female Forehead Crown + Face-Framing Side Bangs
+      const crownTop = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.16, 0.50), mHair);
+      crownTop.position.set(0, 0.22, -0.01);
+      const bangL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.34, 0.12), mHair);
+      bangL.position.set(-0.22, 0.04, 0.18);
+      const bangR = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.34, 0.12), mHair);
+      bangR.position.set(0.22, 0.04, 0.18);
+      this.hairSlot.add(crownTop, bangL, bangR);
+
+      if (style === 'hat') {
+        const mHat = new THREE.MeshLambertMaterial({ color: 0xf59e0b });
+        const brim = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.08, 0.66), mHat);
+        brim.position.y = 0.25;
+        const crown = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.19, 0.46), mHat);
+        crown.position.y = 0.37;
+        const band = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.05, 0.48), mGemBlue);
+        band.position.y = 0.30;
+        const backLocks = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.56, 0.18), mHair);
+        backLocks.position.set(0, -0.08, -0.20);
+        this.hairSlot.add(brim, crown, band, backLocks);
+      } else if (style === 'ponytail') {
+        const tie = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.12), mGoldTie);
+        tie.position.set(0, 0.18, -0.26);
+        const tailTop = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.34, 0.18), mHair);
+        tailTop.position.set(0, 0.04, -0.34); tailTop.rotation.x = 0.24;
+        const tailLow = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.36, 0.15), mHair);
+        tailLow.position.set(0, -0.26, -0.40); tailLow.rotation.x = 0.14;
+        const backCap = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.28, 0.14), mHair);
+        backCap.position.set(0, 0.08, -0.20);
+        this.hairSlot.add(backCap, tie, tailTop, tailLow);
+      } else if (style === 'twintails') {
+        const backCap = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.26, 0.14), mHair);
+        backCap.position.set(0, 0.08, -0.20);
+        this.hairSlot.add(backCap);
+        for (const s of [-1, 1]) {
+          const rib = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.12, 0.12), mGoldTie);
+          rib.position.set(s * 0.28, 0.12, -0.06);
+          const pig = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.62, 0.16), mHair);
+          pig.position.set(s * 0.34, -0.16, -0.08); pig.rotation.z = s * 0.12;
+          this.hairSlot.add(rib, pig);
+        }
+      } else if (style === 'bob') {
+        const backBob = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.42, 0.18), mHair);
+        backBob.position.set(0, 0.0, -0.20);
+        const sideL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.38, 0.32), mHair);
+        sideL.position.set(-0.25, 0.0, -0.04);
+        const sideR = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.38, 0.32), mHair);
+        sideR.position.set(0.25, 0.0, -0.04);
+        this.hairSlot.add(backBob, sideL, sideR);
+      } else if (style === 'tiara') {
+        const backCap = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.28, 0.16), mHair);
+        backCap.position.set(0, 0.08, -0.20);
+        const bun = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.26), mHair);
+        bun.position.set(0, 0.36, -0.06);
+        const tiaraBase = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.07, 0.08), mGoldTie);
+        tiaraBase.position.set(0, 0.27, 0.22);
+        const tiaraPeak = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.09), mGoldTie);
+        tiaraPeak.position.set(0, 0.33, 0.23);
+        const tiaraGem = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.10), mGemBlue);
+        tiaraGem.position.set(0, 0.32, 0.24);
+        this.hairSlot.add(backCap, bun, tiaraBase, tiaraPeak, tiaraGem);
+      } else {
+        // Long Flowing
+        const back = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.68, 0.18), mHair);
+        back.position.set(0, -0.10, -0.20);
+        const sideL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.54, 0.26), mHair);
+        sideL.position.set(-0.25, -0.06, -0.05);
+        const sideR = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.54, 0.26), mHair);
+        sideR.position.set(0.25, -0.06, -0.05);
+        this.hairSlot.add(back, sideL, sideR);
+      }
+      return;
+    }
+
     if (style === 'hat') {
       const mHat = new THREE.MeshLambertMaterial({ color: 0xf59e0b });
       const brim = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.09, 0.64), mHat);
@@ -312,7 +536,7 @@ export class VoxelPlayer {
       this.hairSlot.add(ridge);
     }
 
-    // Extra 3D voxel chin beard for full beard / goatee
+    // Extra 3D voxel chin beard for full beard / goatee (Male ONLY!)
     if (av.beard === 'full') {
       const b3d = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.14, 0.1), mHair);
       b3d.position.set(0, -0.18, 0.23);
@@ -325,6 +549,8 @@ export class VoxelPlayer {
   }
 
   refreshGearVisuals() {
+    this.maxHp = getPlayerMaxHearts(this.saveState);
+    if (this.hp > this.maxHp) this.hp = this.maxHp;
     this.refreshAvatarVisuals();
     // 1. Rebuild Held Weapon with its exact Upgrade Glow Tier
     while (this.heldWeaponSlot.children.length > 0) {
@@ -537,10 +763,11 @@ export class VoxelPlayer {
     ctx.fillStyle = '#fb7185';
     ctx.fillText(label, W * 0.5, 13);
 
-    // HP numeric ratio centered on bar
+    // Live Percentage HP + Heart ratio centered on overhead bar!
+    const pctNum = Math.round(pct * 100);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 10px monospace';
-    ctx.fillText(`HP ${this.hp}/${this.maxHp}`, W * 0.5, barY + barH * 0.5 + 0.5);
+    ctx.fillText(`HP ${pctNum}% (${this.hp}/${this.maxHp})`, W * 0.5, barY + barH * 0.5 + 0.5);
 
     this.hpTex.needsUpdate = true;
   }
@@ -595,8 +822,49 @@ export class VoxelPlayer {
     this.world.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 0.6, 0)), 0xf97316, 16, 6.0);
   }
 
+  triggerAbility(abilityId, combat) {
+    if (this.hp <= 0) return false;
+    if (!isAbilityUnlocked(this.saveState, abilityId)) return false;
+    if ((this.abilityCooldowns[abilityId] || 0) > 0) return false;
+    const stats = getAbilityStats(this.saveState, abilityId);
+
+    if (abilityId === 'shockwaveSlam') {
+      this.abilityCooldowns.shockwaveSlam = stats.cooldown;
+      if (!this.onGround && this.vel.y > -12) this.vel.y = -14;
+      if (combat) combat.castShockwaveSlam(this, stats);
+      if (this.cb.onAbilityCast) this.cb.onAbilityCast(abilityId, stats);
+      return true;
+    }
+    if (abilityId === 'aegisShield') {
+      this.abilityCooldowns.aegisShield = stats.cooldown;
+      this.aegisTimer = stats.duration;
+      audio.playUpgrade();
+      this.world?.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 0.9, 0)), 0xfacc15, 22, 5.5);
+      if (this.cb.onAbilityCast) this.cb.onAbilityCast(abilityId, stats);
+      return true;
+    }
+    if (abilityId === 'skyNova') {
+      this.abilityCooldowns.skyNova = stats.cooldown;
+      if (combat) combat.castSkyLightningNova(this, stats);
+      if (this.cb.onAbilityCast) this.cb.onAbilityCast(abilityId, stats);
+      return true;
+    }
+    return false;
+  }
+
   takeDamage(amount, knockDir = null) {
     if (this.saveState.godMode || this.invulnTimer > 0 || this.hp <= 0) return;
+    if (this.aegisTimer > 0) {
+      // Aegis Shield blocks all incoming damage (arrows, melee, spikes, magma) + reflects Thorns at Lv6+!
+      this.invulnTimer = 0.35;
+      audio.playEnemyHit();
+      this.world?.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 0.95, 0)), 0xfacc15, 16, 5.2);
+      const aStats = getAbilityStats(this.saveState, 'aegisShield');
+      if (aStats.thornsMult > 0 && this.cb.onAegisThorns) {
+        this.cb.onAegisThorns(this, aStats);
+      }
+      return;
+    }
     this.invulnTimer = 1.0;
 
     if (this.armorShield > 0) {
@@ -659,6 +927,8 @@ export class VoxelPlayer {
     if (this.onGround) {
       this.coyoteTimer = 0.13;
       this.canDoubleJump = !!this.saveState.abilities.doubleJump;
+      this.canTripleJump = isAbilityUnlocked(this.saveState, 'tripleJump');
+      this.isGliding = false;
       this.airDashReady = true;
     } else {
       this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
@@ -667,6 +937,10 @@ export class VoxelPlayer {
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
     this.attackCooldown = Math.max(0, this.attackCooldown - dt);
     this.attackAnim = Math.max(0, this.attackAnim - dt);
+    this.aegisTimer = Math.max(0, this.aegisTimer - dt);
+    this.abilityCooldowns.shockwaveSlam = Math.max(0, (this.abilityCooldowns.shockwaveSlam || 0) - dt);
+    this.abilityCooldowns.aegisShield = Math.max(0, (this.abilityCooldowns.aegisShield || 0) - dt);
+    this.abilityCooldowns.skyNova = Math.max(0, (this.abilityCooldowns.skyNova || 0) - dt);
     this.portalCooldown = Math.max(0, this.portalCooldown - dt);
     this.shopCooldown = Math.max(0, this.shopCooldown - dt);
     this.saveCooldown = Math.max(0, this.saveCooldown - dt);
@@ -727,13 +1001,18 @@ export class VoxelPlayer {
 
     if (this.dashTimer > 0) {
       this.dashTimer -= dt;
+      this.isGliding = false;
       this.vel.x = this.dashDir.x * this.dashSpeed;
       this.vel.z = this.dashDir.z * this.dashSpeed;
       this.vel.y = 0;
     } else {
-      const accel = this.onGround ? 18 : 11;
-      this.vel.x += (moveVec.x * this.moveSpeed - this.vel.x) * Math.min(1, accel * dt);
-      this.vel.z += (moveVec.z * this.moveSpeed - this.vel.z) * Math.min(1, accel * dt);
+      const canGlide = !this.onGround && this.vel.y < -0.45 && !!input.jumpHeld && isAbilityUnlocked(this.saveState, 'skyGlide');
+      this.isGliding = canGlide;
+      const glideStats = canGlide ? getAbilityStats(this.saveState, 'skyGlide') : null;
+      const effSpeed = canGlide ? this.moveSpeed * glideStats.speedBoost : this.moveSpeed;
+      const accel = this.onGround ? 18 : (canGlide ? 13 : 11);
+      this.vel.x += (moveVec.x * effSpeed - this.vel.x) * Math.min(1, accel * dt);
+      this.vel.z += (moveVec.z * effSpeed - this.vel.z) * Math.min(1, accel * dt);
 
       if (movingLen > 0.08) {
         const desiredYaw = Math.atan2(moveVec.x, moveVec.z);
@@ -743,6 +1022,9 @@ export class VoxelPlayer {
         this.facingYaw += diff * Math.min(1, 14 * dt);
       }
       this.vel.y = Math.max(-28, this.vel.y - this.gravity * dt);
+      if (canGlide && this.vel.y < -glideStats.fallSpeed) {
+        this.vel.y = -glideStats.fallSpeed;
+      }
     }
 
     if (this.jumpBufferTimer > 0) {
@@ -761,6 +1043,47 @@ export class VoxelPlayer {
         this.dashTimer = 0;
         audio.playDoubleJump();
         this.world.spawnBurst(this.pos.clone(), 0x38bdf8, 12, 4.2);
+      } else if (this.canTripleJump) {
+        const tj = getAbilityStats(this.saveState, 'tripleJump');
+        this.vel.y = tj.jumpVel;
+        this.canTripleJump = false;
+        this.jumpBufferTimer = 0;
+        this.dashTimer = 0;
+        audio.playDoubleJump();
+        this.world.spawnBurst(this.pos.clone(), 0xfacc15, 18, 5.4);
+        if (this.cb.onTripleJumpPush) {
+          this.cb.onTripleJumpPush(this, tj);
+        }
+      }
+    }
+
+    // Animate Sculpted 3D Sky Wings + Wind Trail & Runic Paladin Aegis Shield visuals
+    if (this.skyWingsGroup) {
+      this.skyWingsGroup.visible = this.isGliding;
+      if (this.isGliding) {
+        const gs = getAbilityStats(this.saveState, 'skyGlide');
+        this.skyWingsGroup.scale.setScalar(gs.wingScale);
+        const flap = Math.sin(elapsed * 11.5) * 0.26;
+        this.wingLeft.rotation.y = 0.28 + flap;
+        this.wingRight.rotation.y = -0.28 - flap;
+        this.glideTrailTimer = (this.glideTrailTimer || 0) - dt;
+        if (this.glideTrailTimer <= 0) {
+          this.glideTrailTimer = 0.14;
+          this.world?.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 0.75, 0)), 0x38bdf8, 4, 2.2);
+        }
+      }
+    }
+    if (this.aegisGroup) {
+      this.aegisGroup.visible = this.aegisTimer > 0;
+      if (this.aegisTimer > 0) {
+        this.aegisSphere.rotation.y = elapsed * 1.4;
+        this.aegisSphere.rotation.x = elapsed * 0.7;
+        this.aegisHalo.rotation.z = -elapsed * 2.6;
+        if (this.aegisHaloTop) this.aegisHaloTop.rotation.z = elapsed * 3.1;
+        if (this.aegisShieldRing) this.aegisShieldRing.rotation.y = -elapsed * 2.1;
+        if (this.aegisRuneDecal) this.aegisRuneDecal.rotation.z = elapsed * 1.15;
+        const pulse = this.aegisTimer < 1.0 ? (0.86 + Math.sin(elapsed * 22) * 0.14) : (1.0 + Math.sin(elapsed * 6) * 0.04);
+        this.aegisGroup.scale.setScalar(pulse);
       }
     }
 

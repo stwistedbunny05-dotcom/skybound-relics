@@ -196,6 +196,44 @@ export function buildLevelWorld(scene, mats, levelDef, openedChests = {}) {
       return;
     }
 
+    if (isl.spiralStep) {
+      // Sleek sculpted floating spiral platform step (zero bulky underside rock so headroom stays completely clear!)
+      addBlock(isl.x, isl.y - 0.34, isl.z, isl.w, 0.68, isl.d, topM);
+      addBlock(isl.x, isl.y - 0.76, isl.z, Math.max(1.4, isl.w - 0.56), 0.16, Math.max(1.4, isl.d - 0.56), isl.isSpiralTop ? mats.goldStone : subM, { solid: false, shadow: false });
+      if (isl.isSpiralTop) {
+        // Golden summit corner beacons marking the jump onto Battle Island #1!
+        for (const sx of [-1, 1]) {
+          addBlock(isl.x + sx * (isl.w * 0.5 - 0.32), isl.y + 0.52, isl.z - (isl.d * 0.5 - 0.32), 0.36, 1.04, 0.36, mats.goldStone, { solid: false });
+          const gem = new THREE.Mesh(
+            new THREE.OctahedronGeometry(0.24, 0),
+            new THREE.MeshBasicMaterial({ color: 0xfef08a })
+          );
+          gem.position.set(isl.x + sx * (isl.w * 0.5 - 0.32), isl.y + 1.28, isl.z - (isl.d * 0.5 - 0.32));
+          root.add(gem);
+          animHooks.push((dt, t) => {
+            gem.rotation.y += dt * 2.2;
+            gem.position.y = isl.y + 1.28 + Math.sin(t * 3.0 + sx) * 0.12;
+          });
+        }
+      } else if (typeof isl.stepIdx === 'number' && isl.stepIdx > 0 && isl.stepIdx % 3 === 0) {
+        // Floating glowing sky crystal guide positioned cleanly at the inner edge facing the spire (never blocking step landings!)
+        const guide = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.22, 0),
+          new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+        );
+        const len = Math.hypot(isl.x, isl.z) || 1;
+        const gx = isl.x - (isl.x / len) * (isl.w * 0.42);
+        const gz = isl.z - (isl.z / len) * (isl.d * 0.42);
+        guide.position.set(gx, isl.y + 0.72, gz);
+        root.add(guide);
+        animHooks.push((dt, t) => {
+          guide.rotation.y += dt * 1.9;
+          guide.position.y = isl.y + 0.72 + Math.sin(t * 2.8 + isl.stepIdx) * 0.10;
+        });
+      }
+      return;
+    }
+
     // Main platform block + cleanly separated tapered underside layers (0.015 gaps eliminate coplanar Z-fighting!)
     addBlock(isl.x, isl.y - 0.5, isl.z, isl.w, 1.0, isl.d, topM);
     if (isl.w >= 6 && isl.d >= 6) {
@@ -350,6 +388,43 @@ export function buildLevelWorld(scene, mats, levelDef, openedChests = {}) {
       orb.position.set(p.x, p.y + 3.42, p.z);
       root.add(orb);
       torches.push(orb);
+    } else if (p.kind === 'spiralSpire') {
+      // Sculpted Central Sky Spiral Tower Pillar rising from the Start Island!
+      const h = p.height || 15.6;
+      const colMat = levelDef.worldId === 'desert' ? mats.sandstone
+        : levelDef.worldId === 'dungeon' ? mats.obsidian
+        : levelDef.worldId === 'beach' ? mats.skyMarble
+        : mats.castleStone;
+      // Stepped pedestal base + tall central shaft (solid colliders!)
+      addBlock(p.x, p.y + 0.42, p.z, 3.6, 0.84, 3.6, mats.goldStone);
+      addBlock(p.x, p.y + 0.84 + (h - 0.84) * 0.5, p.z, 2.5, h - 0.84, 2.5, colMat);
+      // Decorative gilded architectural bands up the spire
+      for (const bandY of [3.2, 6.2, 9.2, 12.2, h - 0.35]) {
+        if (bandY < h) {
+          addBlock(p.x, p.y + bandY, p.z, 2.95, 0.36, 2.95, mats.goldStone, { solid: false });
+        }
+      }
+      // Glowing rotating Sky Crystal Crown at the spire peak
+      const crown = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.95, 0),
+        new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+      );
+      crown.scale.set(0.85, 1.45, 0.85);
+      crown.position.set(p.x, p.y + h + 1.35, p.z);
+      root.add(crown);
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(1.15, 1.45, 16),
+        new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(p.x, p.y + h + 1.35, p.z);
+      root.add(ring);
+      animHooks.push((dt, t) => {
+        crown.rotation.y += dt * 1.4;
+        crown.position.y = p.y + h + 1.35 + Math.sin(t * 2.2) * 0.25;
+        ring.rotation.z -= dt * 1.1;
+        ring.position.y = crown.position.y;
+      });
     }
   }
 
@@ -586,19 +661,56 @@ export function buildLevelWorld(scene, mats, levelDef, openedChests = {}) {
     const lbl = makeFloatingLabel(`[${ap.tag}] ${ap.name}`, '#67e8f9', 288, 3.8);
     lbl.position.set(0, 2.25, 0);
 
-    g.add(legL, legR, torso, cape, head, eyeL, eyeR, brim, crown, armL, armR, lbl);
-    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    // Red aggro ring & overhead HP bar (hidden until player hits this NPC in Safe Haven!)
+    const aggroRingGeo = new THREE.RingGeometry(0.68, 0.90, 20);
+    aggroRingGeo.rotateX(-Math.PI / 2);
+    const aggroRing = new THREE.Mesh(
+      aggroRingGeo,
+      new THREE.MeshBasicMaterial({ color: 0xf43f5e, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+    );
+    aggroRing.position.y = 0.04;
+    aggroRing.visible = false;
+
+    const hpCanvas = document.createElement('canvas');
+    hpCanvas.width = 128; hpCanvas.height = 24;
+    const hpCtx = hpCanvas.getContext('2d');
+    const hpTex = new THREE.CanvasTexture(hpCanvas);
+    hpTex.magFilter = THREE.NearestFilter;
+    const hpSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: hpTex, transparent: true, depthTest: false }));
+    hpSprite.scale.set(1.5, 0.28, 1);
+    hpSprite.position.set(0, 2.68, 0);
+    hpSprite.visible = false;
+    const redrawHp = (hpVal, maxVal) => {
+      hpCtx.clearRect(0, 0, 128, 24);
+      hpCtx.fillStyle = 'rgba(2,6,23,0.86)'; hpCtx.fillRect(2, 2, 124, 20);
+      hpCtx.strokeStyle = '#f43f5e'; hpCtx.lineWidth = 2; hpCtx.strokeRect(2, 2, 124, 20);
+      const frac = Math.max(0, Math.min(1, hpVal / Math.max(1, maxVal)));
+      hpCtx.fillStyle = frac > 0.5 ? '#f97316' : '#ef4444';
+      hpCtx.fillRect(6, 6, Math.round(116 * frac), 12);
+      hpCtx.fillStyle = '#ffffff'; hpCtx.font = 'bold 10px monospace'; hpCtx.textAlign = 'center';
+      hpCtx.fillText(`${Math.round(frac * 100)}%`, 64, 15);
+      hpTex.needsUpdate = true;
+    };
+
+    g.add(legL, legR, torso, cape, head, eyeL, eyeR, brim, crown, armL, armR, lbl, aggroRing, hpSprite);
+    g.traverse((o) => { if (o.isMesh && o !== aggroRing) o.castShadow = true; });
     root.add(g);
 
     const firstWp = havenWaypoints[Math.floor(Math.random() * havenWaypoints.length)];
     roamingAi.push({
-      group: g, legL, legR, armL, armR, cape,
+      id: `explorer_${ap.name.toLowerCase()}`,
+      isExplorer: true,
+      name: ap.name,
+      role: `[${ap.tag}] ${ap.style === 'ranged' ? 'Sky Ranger' : 'Sky Knight'}`,
+      profile: ap,
+      group: g, legL, legR, armL, armR, cape, aggroRing, hpSprite, redrawHp,
       pos: new THREE.Vector3(ap.spawnX, 0.008, ap.spawnZ),
       targetX: firstWp[0], targetZ: firstWp[1],
       yaw: 0, speed: 3.4 + Math.random() * 1.4,
       waitTimer: 0.4 + Math.random() * 1.5,
       jumpY: 0, jumpVel: 0, walkCycle: Math.random() * 5,
       swingTimer: 0,
+      hostile: false, hp: 140, maxHp: 140, attackCd: 0.6, calmTimer: 0, defeatedTimer: 0, hitFlash: 0,
     });
   }
 
@@ -1155,8 +1267,21 @@ export function buildLevelWorld(scene, mats, levelDef, openedChests = {}) {
       n.marker.position.y = 3.05 + Math.sin(elapsed * 3.0 + n.x) * 0.16;
     }
 
-    // Roaming Safe Haven AI NPC Explorers (Autonomous Waypoint, Avoidance, Jump & Emote AI!)
-    for (const ai of roamingAi) {
+    // Roaming Safe Haven AI NPC Explorers (Autonomous Waypoint, Separation, Sparring Aggro & Emote AI!)
+    for (let aiIdx = 0; aiIdx < roamingAi.length; aiIdx++) {
+      const ai = roamingAi[aiIdx];
+      if (ai.defeatedTimer > 0) {
+        ai.defeatedTimer = Math.max(0, ai.defeatedTimer - dt);
+        ai.group.visible = false;
+        if (ai.defeatedTimer <= 0) {
+          ai.hp = ai.maxHp;
+          ai.hostile = false;
+          ai.aggroRing.visible = false;
+          ai.hpSprite.visible = false;
+          ai.group.visible = true;
+        }
+        continue;
+      }
       // Gravity for playful hops
       if (ai.jumpY > 0 || ai.jumpVel > 0) {
         ai.jumpVel -= 22 * dt;
@@ -1164,56 +1289,85 @@ export function buildLevelWorld(scene, mats, levelDef, openedChests = {}) {
         if (ai.jumpY <= 0) ai.jumpVel = 0;
       }
 
-      if (ai.waitTimer > 0) {
-        ai.waitTimer -= dt;
-        ai.legL.rotation.x *= 0.82;
-        ai.legR.rotation.x *= 0.82;
-        if (ai.swingTimer > 0) {
-          ai.swingTimer -= dt;
-          ai.armR.rotation.x = -1.65;
-        } else {
-          ai.armR.rotation.x *= 0.85;
-        }
-        ai.armL.rotation.x *= 0.85;
-        if (ai.waitTimer <= 0) {
-          const wp = havenWaypoints[Math.floor(Math.random() * havenWaypoints.length)];
-          ai.targetX = wp[0] + (Math.random() - 0.5) * 4.5;
-          ai.targetZ = wp[1] + (Math.random() - 0.5) * 4.5;
-          if (Math.random() < 0.35 && ai.jumpY <= 0) ai.jumpVel = 7.4;
-        }
-      } else {
-        let dx = ai.targetX - ai.pos.x;
-        let dz = ai.targetZ - ai.pos.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist < 1.1) {
-          ai.waitTimer = 1.4 + Math.random() * 2.6;
-          if (Math.random() < 0.45) ai.swingTimer = 0.42;
-        } else {
-          // Steer cleanly around Grand Sanctuary Fountain (0, 6), Blacksmith Forge (-27.5, 6), & Weapon Store (27.5, 6)
-          for (const [ox, oz, rad] of [[0, 6, 5.6], [-27.5, 6, 6.2], [27.5, 6, 6.2]]) {
-            const oDist = Math.hypot(ai.pos.x - ox, ai.pos.z - oz);
-            if (oDist < rad && oDist > 0.05) {
-              dx += ((ai.pos.x - ox) / oDist) * 5.6;
-              dz += ((ai.pos.z - oz) / oDist) * 5.6;
-            }
+      // Skip patrol steering when hostile (combat.js drives hostile sparring movement!)
+      if (!ai.hostile) {
+        if (ai.waitTimer > 0) {
+          ai.waitTimer -= dt;
+          ai.legL.rotation.x *= 0.82;
+          ai.legR.rotation.x *= 0.82;
+          if (ai.swingTimer > 0) {
+            ai.swingTimer -= dt;
+            ai.armR.rotation.x = -1.65;
+          } else {
+            ai.armR.rotation.x *= 0.85;
           }
-          const len = Math.hypot(dx, dz) || 1;
-          const desiredYaw = Math.atan2(dx, dz);
-          let diff = desiredYaw - ai.yaw;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          ai.yaw += diff * Math.min(1, 8 * dt);
-          ai.pos.x = Math.max(-56, Math.min(56, ai.pos.x + (dx / len) * ai.speed * dt));
-          ai.pos.z = Math.max(-52, Math.min(52, ai.pos.z + (dz / len) * ai.speed * dt));
-          ai.walkCycle += dt * ai.speed * 1.9;
-          const sw = Math.sin(ai.walkCycle) * 0.55;
-          ai.legL.rotation.x = sw;
-          ai.legR.rotation.x = -sw;
-          ai.armL.rotation.x = -sw * 0.7;
-          ai.armR.rotation.x = sw * 0.6;
-          ai.cape.rotation.x = 0.22 + Math.abs(sw) * 0.25;
+          ai.armL.rotation.x *= 0.85;
+          if (ai.waitTimer <= 0) {
+            const wp = havenWaypoints[Math.floor(Math.random() * havenWaypoints.length)];
+            ai.targetX = wp[0] + (Math.random() - 0.5) * 4.5;
+            ai.targetZ = wp[1] + (Math.random() - 0.5) * 4.5;
+            if (Math.random() < 0.35 && ai.jumpY <= 0) ai.jumpVel = 7.4;
+          }
+        } else {
+          let dx = ai.targetX - ai.pos.x;
+          let dz = ai.targetZ - ai.pos.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist < 1.1) {
+            ai.waitTimer = 1.4 + Math.random() * 2.6;
+            if (Math.random() < 0.45) ai.swingTimer = 0.42;
+          } else {
+            for (const [ox, oz, rad] of [[0, 6, 5.6], [-27.5, 6, 6.2], [27.5, 6, 6.2]]) {
+              const oDist = Math.hypot(ai.pos.x - ox, ai.pos.z - oz);
+              if (oDist < rad && oDist > 0.05) {
+                dx += ((ai.pos.x - ox) / oDist) * 5.6;
+                dz += ((ai.pos.z - oz) / oDist) * 5.6;
+              }
+            }
+            const len = Math.hypot(dx, dz) || 1;
+            const desiredYaw = Math.atan2(dx, dz);
+            let diff = desiredYaw - ai.yaw;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            ai.yaw += diff * Math.min(1, 8 * dt);
+            ai.pos.x = Math.max(-56, Math.min(56, ai.pos.x + (dx / len) * ai.speed * dt));
+            ai.pos.z = Math.max(-52, Math.min(52, ai.pos.z + (dz / len) * ai.speed * dt));
+            ai.walkCycle += dt * ai.speed * 1.9;
+            const sw = Math.sin(ai.walkCycle) * 0.55;
+            ai.legL.rotation.x = sw;
+            ai.legR.rotation.x = -sw;
+            ai.armL.rotation.x = -sw * 0.7;
+            ai.armR.rotation.x = sw * 0.6;
+            ai.cape.rotation.x = 0.22 + Math.abs(sw) * 0.25;
+          }
         }
       }
+
+      // Soft separation between characters so NPCs never layer/stack on top of each other or the player!
+      for (let j = aiIdx + 1; j < roamingAi.length; j++) {
+        const other = roamingAi[j];
+        if (other.defeatedTimer > 0) continue;
+        const sdx = ai.pos.x - other.pos.x;
+        const sdz = ai.pos.z - other.pos.z;
+        const sd = Math.hypot(sdx, sdz);
+        if (sd > 0.001 && sd < 1.35) {
+          const push = (1.35 - sd) * 0.5;
+          ai.pos.x += (sdx / sd) * push;
+          ai.pos.z += (sdz / sd) * push;
+          other.pos.x -= (sdx / sd) * push;
+          other.pos.z -= (sdz / sd) * push;
+        }
+      }
+      if (playerPos && !ai.hostile) {
+        const pdx = ai.pos.x - playerPos.x;
+        const pdz = ai.pos.z - playerPos.z;
+        const pd = Math.hypot(pdx, pdz);
+        if (pd > 0.001 && pd < 1.15) {
+          const push = (1.15 - pd) * 0.55;
+          ai.pos.x += (pdx / pd) * push;
+          ai.pos.z += (pdz / pd) * push;
+        }
+      }
+
       ai.group.position.set(ai.pos.x, ai.pos.y + ai.jumpY, ai.pos.z);
       ai.group.rotation.y = ai.yaw;
     }
@@ -1443,7 +1597,7 @@ export function buildLevelWorld(scene, mats, levelDef, openedChests = {}) {
   return {
     colliders, jumpPads, movingPlatforms, spikeTraps, spinners, crumbleBlocks, crushers, hazardZones,
     pendulums, turrets, turretOrbs, waterZones,
-    portals, chests, checkpoints, friendlyNpcs,
+    portals, chests, checkpoints, friendlyNpcs, roamingAi,
     goalRelic, shopPos, savePos, castleInteriorBounds,
     setRelicUnlocked, setWaypoint, setGuideArrow, spawnBurst, spawnWaterSplash, update, dispose,
   };

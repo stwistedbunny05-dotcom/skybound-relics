@@ -39,6 +39,14 @@ const BIOME_STYLE = {
   },
 };
 
+// 20 Verified wide-open Safe Haven spawn spots (strictly clear of Fountain, Ponds, Castle Walls, Forge, Store & Portals!)
+export const SAFE_HAVEN_SPAWN_POINTS = [
+  [-16, 1.2, 18], [16, 1.2, 18], [-10, 1.2, 22], [10, 1.2, 22], [0, 1.2, 19],
+  [-18, 1.2, 8],  [18, 1.2, 8],  [-14, 1.2, 2],  [14, 1.2, 2],  [-6, 1.2, 14],
+  [6, 1.2, 14],   [-12, 1.2, 26],[12, 1.2, 26],  [-16, 1.2, -10],[16, 1.2, -10],
+  [-8, 1.2, -12], [8, 1.2, -12], [-22, 1.2, 16], [22, 1.2, 16], [0, 1.2, 28],
+];
+
 export function buildSafeHavenDef(saveState) {
   return {
     worldId: 'haven',
@@ -337,6 +345,11 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
 
   const isBossLevel = levelNum % 10 === 0;
   const isChestLevel = levelNum % 25 === 0;
+  // Seeded random Sky Spiral Ascent Tower stages across ALL 4 worlds (~30% of levels per world, unique mix per world!)
+  const spiralRng = mulberry32(meta.order * 91813 + levelNum * 4999 + 777);
+  const isSpiralLevel = (worldId === 'forest' && levelNum === 2) || (levelNum > 1 && spiralRng() < 0.30);
+  const spiralDir = spiralRng() < 0.5 ? 1 : -1;
+  const spiralStepCount = [12, 14, 16][Math.floor(spiralRng() * 3)];
   // Deeper multi-stage Big-World RPG levels (5 to 7 huge interconnected islands!)
   const islandCount = isBossLevel ? 5 : (levelNum <= 10 ? 5 : levelNum <= 40 ? 6 : 7);
 
@@ -374,6 +387,7 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
     campfire: [1.45, 1.35],
     stoneWall: [2.45, 0.90],
     worldLandmark: [3.45, 3.45],
+    spiralSpire: [1.95, 1.95],
   };
 
   function overlapsZones(zones, x, z, hw, hd, pad = 0.45) {
@@ -416,8 +430,8 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
   let cx = 0;
   let cy = 0;
   let cz = 0;
-  let prevW = 18;
-  let prevD = 18;
+  let prevW = isSpiralLevel ? 24 : 18;
+  let prevD = isSpiralLevel ? 24 : 18;
 
   islandSpecs.push({
     idx: 0, x: cx, y: cy, z: cz, w: prevW, d: prevD,
@@ -426,6 +440,41 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
     outgoingJumpPad: null, chestJumpPad: null,
   });
   islands.push({ x: cx, y: cy, z: cz, w: prevW, d: prevD, top: style.top, sub: style.sub, rock: style.rock });
+
+  // Sky Spiral Platform Ascent Tower rising directly above the 24x24 Start Island!
+  // Slip off any upper step and you tumble straight back down to lower steps or all the way to Start (y = 0)!
+  if (isSpiralLevel) {
+    const spiralRadius = 6.4;
+    const stepCount = spiralStepCount;
+    const stepRise = stepCount === 12 ? 1.06 : stepCount === 16 ? 0.90 : 0.98;
+    const spiralTopY = 1.05 + (stepCount - 1) * stepRise;
+    props.push({ kind: 'spiralSpire', x: 0, y: 0, z: 0, height: spiralTopY + 1.8 });
+    for (let s = 0; s < stepCount; s++) {
+      // 1.5 full helical turns (0 -> ±3*PI): Step 0 starts South (+6.4) in front of spawn; Top step ALWAYS exits North (-6.4) facing Battle Island #1!
+      const ang = spiralDir * (s / (stepCount - 1)) * (Math.PI * 3);
+      const sx = Math.sin(ang) * spiralRadius;
+      const sz = Math.cos(ang) * spiralRadius;
+      const sy = 1.05 + s * stepRise;
+      const isTopStep = s === stepCount - 1;
+      const sw = isTopStep ? 4.4 : 3.8;
+      const sd = isTopStep ? 4.4 : 3.8;
+      islands.push({
+        x: sx, y: sy, z: sz, w: sw, d: sd,
+        top: isTopStep ? 'gold' : style.top,
+        sub: style.sub,
+        rock: style.rock,
+        spiralStep: true,
+        stepIdx: s,
+        isSpiralTop: isTopStep,
+      });
+    }
+    // Launch Battle Island #1 cleanly from the top of the Spiral Summit (0, spiralTopY, -6.4)!
+    cx = 0;
+    cy = spiralTopY;
+    cz = -spiralRadius;
+    prevW = 4.4;
+    prevD = 4.4;
+  }
 
   // Enemy HP, Difficulty Scaling & Owner-Fair Credit Coin scaling across all 400 levels
   const worldScale = 1 + (meta.order - 1) * 1.45;
@@ -455,12 +504,13 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
     }
     prevDirX = dirX;
 
-    const useMover = !isFinal && (i === 3 || rng() < 0.32);
-    const useCrumble = !useMover && (i === 2 || rng() < 0.42);
-    const useJumpPad = !useMover && !useCrumble && rng() < 0.44;
+    const isSpiralExit = isSpiralLevel && i === 1;
+    const useMover = !isSpiralExit && !isFinal && (i === 3 || rng() < 0.32);
+    const useCrumble = !isSpiralExit && !useMover && (i === 2 || rng() < 0.42);
+    const useJumpPad = !isSpiralExit && !useMover && !useCrumble && rng() < 0.44;
     // WIDE SKILL GAPS: Double-jump alone (~10.8m) CANNOT clear these — requires Double-Jump + Directional Dash (or Mover / Jump Pad)!
-    const gap = useMover ? 20.5 : useCrumble ? 27.6 : useJumpPad ? 16.0 : 12.4;
-    const rise = useJumpPad ? 3.2 : (1.35 + rng() * 0.55);
+    const gap = isSpiralExit ? 6.2 : (useMover ? 20.5 : useCrumble ? 27.6 : useJumpPad ? 16.0 : 12.4);
+    const rise = isSpiralExit ? 0.65 : (useJumpPad ? 3.2 : (1.35 + rng() * 0.55));
 
     const stepDist = (dirZ !== 0 ? (prevD / 2 + d / 2) : (prevW / 2 + w / 2)) + gap;
     const nx = cx + dirX * stepDist;
@@ -511,9 +561,15 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
     prevW = w; prevD = d;
   }
 
-  // Every 25th level (25, 50, 75, 100): HIDDEN CHEST on open unobstructed side (registered BEFORE props!)
+  // Every 25th level (25, 50, 75, 100): HIDDEN CHEST on open unobstructed side (verified clear of all neighbor islands!)
   if (isChestLevel && chestIslandSpec) {
-    const side = chestIslandSpec.incomingDirX === 1 ? 1 : (chestIslandSpec.incomingDirX === -1 ? -1 : (rng() < 0.5 ? -1 : 1));
+    let side = chestIslandSpec.incomingDirX === 1 ? 1 : (chestIslandSpec.incomingDirX === -1 ? -1 : (rng() < 0.5 ? -1 : 1));
+    const sideBlocked = (s) => {
+      const testX = chestIslandSpec.x + s * (chestIslandSpec.w * 0.5 + 6.0);
+      const testZ = chestIslandSpec.z;
+      return islandSpecs.some((sp) => sp !== chestIslandSpec && Math.abs(testX - sp.x) < (sp.w * 0.5 + 4.8) && Math.abs(testZ - sp.z) < (sp.d * 0.5 + 4.8));
+    };
+    if (sideBlocked(side) && !sideBlocked(-side)) side = -side;
     const chX = chestIslandSpec.x + side * (chestIslandSpec.w * 0.5 + 6.0);
     const chY = chestIslandSpec.y + 1.8;
     const chZ = chestIslandSpec.z;
@@ -530,15 +586,21 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
   {
     const s0 = islandSpecs[0];
     const z0 = [];
-    // Reserve hero spawn + center lane + outgoing jump pad (if any)
-    reserveZone(z0, 0, 4.5, 2.2, 2.2);
+    // Reserve hero spawn + spiral tower ring (if any) + outgoing jump pad (if any)
+    if (isSpiralLevel) {
+      reserveZone(z0, 0, 0, 9.2, 9.2);
+      reserveZone(z0, 0, 10.0, 2.2, 2.0);
+    } else {
+      reserveZone(z0, 0, 4.5, 2.2, 2.2);
+    }
     if (s0.outgoingJumpPad) reserveZone(z0, s0.outgoingJumpPad.x, s0.outgoingJumpPad.z, 2.0, 2.0);
-    tryPlaceProp(z0, s0, { kind: style.prop, x: s0.x - 6.8, y: s0.y, z: s0.z + 6.2 });
-    tryPlaceProp(z0, s0, { kind: style.prop, x: s0.x + 6.8, y: s0.y, z: s0.z + 6.2 });
-    tryPlaceProp(z0, s0, { kind: style.scenery[0], x: s0.x - 5.2, y: s0.y, z: s0.z - 5.0 });
-    tryPlaceProp(z0, s0, { kind: style.scenery[1 % style.scenery.length], x: s0.x + 5.6, y: s0.y, z: s0.z - 4.8 });
-    tryPlaceProp(z0, s0, { kind: style.scenery[3 % style.scenery.length], x: s0.x - 6.6, y: s0.y, z: s0.z + 0.5 });
-    tryPlaceProp(z0, s0, { kind: style.scenery[2 % style.scenery.length], x: s0.x + 6.8, y: s0.y, z: s0.z + 1.2 });
+    const off = isSpiralLevel ? 9.6 : 6.8;
+    tryPlaceProp(z0, s0, { kind: style.prop, x: s0.x - off, y: s0.y, z: s0.z + (isSpiralLevel ? 9.4 : 6.2) });
+    tryPlaceProp(z0, s0, { kind: style.prop, x: s0.x + off, y: s0.y, z: s0.z + (isSpiralLevel ? 9.4 : 6.2) });
+    tryPlaceProp(z0, s0, { kind: style.scenery[0], x: s0.x - (isSpiralLevel ? 9.8 : 5.2), y: s0.y, z: s0.z - (isSpiralLevel ? 9.6 : 5.0) });
+    tryPlaceProp(z0, s0, { kind: style.scenery[1 % style.scenery.length], x: s0.x + (isSpiralLevel ? 9.8 : 5.6), y: s0.y, z: s0.z - (isSpiralLevel ? 9.6 : 4.8) });
+    tryPlaceProp(z0, s0, { kind: style.scenery[3 % style.scenery.length], x: s0.x - off, y: s0.y, z: s0.z + 0.5 });
+    tryPlaceProp(z0, s0, { kind: style.scenery[2 % style.scenery.length], x: s0.x + off, y: s0.y, z: s0.z + 1.2 });
   }
 
   // PASS 3: Populate Battle Islands (1..islandCount) with strict Spatial Footprint Reservation (ZERO OVERLAP!)
@@ -600,28 +662,29 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
       }
     }
 
-    // 3. Riveted Metal Box + Rotating Blade Sweepers (checked against zones so blades NEVER clip crusher or saw!)
+    // 3. Riveted Metal Box + Rotating Blade Sweepers (reserves FULL sweep radius so blades NEVER clip traps or props!)
     const mainSpinnerR = isFinal ? 3.4 : 3.0;
-    if (!overlapsZones(zones, nx, nz + 0.6, mainSpinnerR * 0.65, mainSpinnerR * 0.65, 0.35)) {
+    const mainReserveR = mainSpinnerR + 0.15;
+    if (!overlapsZones(zones, nx, nz + 0.6, mainReserveR, mainReserveR, 0.30)) {
       spinners.push({
         x: nx, y: ny, z: nz + 0.6,
         radius: mainSpinnerR,
         speed: (1.55 + Math.min(0.9, meta.order * 0.18 + levelNum * 0.008)) * diff.trapSpeedMult * (i % 2 === 0 ? -1 : 1),
         phase: rng() * Math.PI * 2,
       });
-      reserveZone(zones, nx, nz + 0.6, mainSpinnerR * 0.68, mainSpinnerR * 0.68);
+      reserveZone(zones, nx, nz + 0.6, mainReserveR, mainReserveR);
     }
     if (i >= 3 || isFinal) {
       const sp2X = nx + (i % 2 === 0 ? 7.6 : -7.6);
       const sp2Z = nz + 1.5;
-      if (!overlapsZones(zones, sp2X, sp2Z, 2.2, 2.2, 0.35)) {
+      if (!overlapsZones(zones, sp2X, sp2Z, 2.65, 2.65, 0.30)) {
         spinners.push({
           x: sp2X, y: ny, z: sp2Z,
           radius: 2.5,
           speed: (1.85 + Math.min(0.7, levelNum * 0.006)) * diff.trapSpeedMult * (i % 2 === 0 ? 1 : -1),
           phase: rng() * Math.PI * 2,
         });
-        reserveZone(zones, sp2X, sp2Z, 2.2, 2.2);
+        reserveZone(zones, sp2X, sp2Z, 2.65, 2.65);
       }
     }
 
@@ -744,16 +807,23 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
       const isBoss = isFinal && isBossLevel && eIdx === 0;
       let ex = nx;
       let ez = isBoss ? nz + 0.2 : nz;
-      if (!isBoss) {
-        for (let tries = 0; tries < 6; tries++) {
-          const angle = (eIdx / countHere) * Math.PI * 2 + rng() * 0.6 + tries * 0.55;
-          const radX = Math.min(w * 0.32, 4.5 + rng() * 3.5);
-          const radZ = Math.min(d * 0.27, 3.2 + rng() * 2.8);
+      const halfReq = isBoss ? 1.05 : 0.75;
+      if (!isBoss || overlapsZones(zones, ex, ez, halfReq, halfReq, 0.25)) {
+        let placed = false;
+        const triesMax = isBoss ? 16 : 12;
+        for (let tries = 0; tries < triesMax; tries++) {
+          const angle = (eIdx / countHere) * Math.PI * 2 + (tries / triesMax) * Math.PI * 2 + rng() * 0.35;
+          const radX = isBoss ? Math.min(w * 0.28, 3.8 + (tries % 3) * 1.1) : Math.min(w * 0.34, 4.2 + rng() * 3.8);
+          const radZ = isBoss ? Math.min(d * 0.25, 3.2 + (tries % 3) * 0.9) : Math.min(d * 0.28, 3.2 + rng() * 2.8);
           const candX = nx + Math.cos(angle) * radX;
           const candZ = nz + Math.sin(angle) * radZ;
-          if (!overlapsZones(zones, candX, candZ, 0.75, 0.75, 0.25)) {
-            ex = candX; ez = candZ; break;
+          if (!overlapsZones(zones, candX, candZ, halfReq, halfReq, 0.25)) {
+            ex = candX; ez = candZ; placed = true; break;
           }
+        }
+        if (!placed && isBoss) {
+          ex = nx;
+          ez = nz + d * 0.14;
         }
       }
 
@@ -786,12 +856,12 @@ export function generateBiomeLevel(worldId, levelNum, diffTier = 0) {
   const relic = { x: lastSpec.x, y: lastSpec.y + 1.7, z: lastSpec.z - lastSpec.d * 0.40, title: `${uniqueTitle} (Lv.${levelNum})`, sealed: true };
 
   return {
-    worldId, levelNum, isHaven: false, isBossLevel, isChestLevel,
-    name: `${meta.name} ${levelNum} · ${uniqueTitle}`,
+    worldId, levelNum, isHaven: false, isBossLevel, isChestLevel, isSpiralLevel,
+    name: `${meta.name} ${levelNum} · ${uniqueTitle}${isSpiralLevel ? ' · Spiral Tower' : ''}`,
     sky: mood ? mood.sky : meta.sky,
     fog: mood ? mood.fog : meta.fog,
     dustColor: style.dustColor,
-    spawn: [0, 1.2, 4.5],
+    spawn: isSpiralLevel ? [0, 1.2, 10.0] : [0, 1.2, 4.5],
     islands, props, pillars, jumpPads, movers,
     spikeTraps, spinners, crumbleBlocks, crushers, hazardZones, pendulums, turrets,
     portals: [], npcs: [],

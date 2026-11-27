@@ -219,6 +219,12 @@
             <option value="weapon">⚔️ Rare / Boss Weapon Gift</option>
             <option value="arrow">⚡ Elemental Arrows Unlock</option>
             <option value="armor">🛡️ 3D Armor Glow Upgrade</option>
+            <option value="max_hearts">❤️ Max Life Hearts Upgrade (4–6 ♥)</option>
+            <option value="stat_boost">💪 Hero Stats Boost (+STR/STA/SPD)</option>
+            <option value="ability_boost">✨ Hero Abilities Enhancement (All 5)</option>
+            <option value="difficulty_unlock">🔥 Unlock Difficulty Tier (MEDIUM / HARD)</option>
+            <option value="rank_boost">🏆 Stage Rank &amp; World Unlock Boost</option>
+            <option value="world_unlock">🌍 Grant World Access (Beach / Desert / Dungeon / ALL)</option>
           </select>
           <select id="itemWeaponId" class="hidden" style="min-width:200px;">
             <option value="sunblade">★ RARE: Sunblade (Sword)</option>
@@ -253,6 +259,39 @@
             <option value="4">Armor Lv 4 Gold</option>
             <option value="5">Armor Lv 5 Violet</option>
             <option value="6" selected>Armor Lv 6 Mythic</option>
+          </select>
+          <select id="itemHeartsLvl" class="hidden">
+            <option value="4">Upgrade to 4 ♥ Max Life</option>
+            <option value="5">Upgrade to 5 ♥ Max Life</option>
+            <option value="6" selected>Upgrade to 6 ♥ MAX Life</option>
+          </select>
+          <select id="itemStatBoost" class="hidden">
+            <option value="1">+1 All Stats (STR/STA/SPD)</option>
+            <option value="2" selected>+2 All Stats (STR/STA/SPD)</option>
+            <option value="3">+3 All Stats (STR/STA/SPD)</option>
+            <option value="10">MAX All Stats (Lv 10)</option>
+          </select>
+          <select id="itemAbilityLvl" class="hidden">
+            <option value="3">All 5 Abilities → Lv 3 (EASY Cap)</option>
+            <option value="6" selected>All 5 Abilities → Lv 6 (MEDIUM Cap)</option>
+            <option value="9">All 5 Abilities → Lv 9 MAX (HARD)</option>
+          </select>
+          <select id="itemDiffTier" class="hidden">
+            <option value="1">Unlock MEDIUM Difficulty (All Worlds)</option>
+            <option value="2" selected>Unlock HARD Difficulty (All Worlds)</option>
+          </select>
+          <select id="itemRankBoost" class="hidden">
+            <option value="5">+5 Stage Rank Levels</option>
+            <option value="15" selected>+15 Stage Rank Levels</option>
+            <option value="40">+40 Rank (Unlocks All 5 Abilities!)</option>
+            <option value="100">+100 Rank (Unlocks All Worlds &amp; Gear!)</option>
+          </select>
+          <select id="itemWorldAccess" class="hidden">
+            <option value="beach">🏝️ Unlock Sky Beach Portal</option>
+            <option value="desert">🏜️ Unlock Sky Desert Portal</option>
+            <option value="dungeon">🏰 Unlock Sky Dungeon Portal</option>
+            <option value="all" selected>🌍 Unlock ALL 4 Worlds (Forest + Beach + Desert + Dungeon)</option>
+            <option value="all_100">👑 VIP / Owner Full Access (ALL 4 Worlds · All 100 Levels · All Difficulties!)</option>
           </select>
           <input id="itemNote" maxlength="80" placeholder="Note (e.g. Lucky Drop!)" value="Owner Lucky Drop" style="flex:1;min-width:150px;" />
           <button type="submit" class="primary" style="background:#c084fc;border-color:#f0abfc;color:#0f172a;">SEND RARE GIFT / LUCKY DROP</button>
@@ -429,6 +468,15 @@
           else if (g.kind === 'weapon' && g.weaponId) parts.push(`⚔️ ${WPN_LABELS[g.weaponId] || g.weaponId} Lv${g.weaponLevel || 1}`);
           else if (g.kind === 'arrow' && g.arrowId) parts.push(`⚡ ${g.arrowId.toUpperCase()} ARROWS`);
           else if (g.kind === 'armor' && g.armorLevel) parts.push(`🛡️ ARMOR Lv${g.armorLevel}`);
+          else if (g.kind === 'max_hearts' && g.heartsLevel) parts.push(`❤️ MAX LIFE → ${g.heartsLevel} ♥`);
+          else if (g.kind === 'stat_boost' && g.statBoost) parts.push(`💪 +${g.statBoost} ALL STATS`);
+          else if (g.kind === 'ability_boost' && g.abilityLevel) parts.push(`✨ ABILITIES → Lv${g.abilityLevel}`);
+          else if (g.kind === 'difficulty_unlock' && g.diffTier) parts.push(`🔥 UNLOCK ${g.diffTier >= 2 ? 'HARD' : 'MEDIUM'}`);
+          else if (g.kind === 'rank_boost' && g.rankBoost) parts.push(`🏆 +${g.rankBoost} STAGE RANK`);
+          else if (g.kind === 'world_unlock' && g.worldAccess) {
+            const wLbl = g.worldAccess === 'all_100' ? 'ALL 4 WORLDS + ALL 100 LVLS' : g.worldAccess === 'all' ? 'ALL 4 WORLDS' : `SKY ${g.worldAccess.toUpperCase()}`;
+            parts.push(`🌍 ${wLbl}`);
+          }
           if (Number(g.amount) > 0) parts.push(`+${Number(g.amount).toLocaleString()} CR`);
           return parts.join(' + ') || 'Gift';
         };
@@ -559,6 +607,12 @@
       document.getElementById('itemWeaponLvl').classList.toggle('hidden', k !== 'weapon');
       document.getElementById('itemArrowId').classList.toggle('hidden', k !== 'arrow');
       document.getElementById('itemArmorLvl').classList.toggle('hidden', k !== 'armor');
+      document.getElementById('itemHeartsLvl').classList.toggle('hidden', k !== 'max_hearts');
+      document.getElementById('itemStatBoost').classList.toggle('hidden', k !== 'stat_boost');
+      document.getElementById('itemAbilityLvl').classList.toggle('hidden', k !== 'ability_boost');
+      document.getElementById('itemDiffTier').classList.toggle('hidden', k !== 'difficulty_unlock');
+      document.getElementById('itemRankBoost').classList.toggle('hidden', k !== 'rank_boost');
+      document.getElementById('itemWorldAccess').classList.toggle('hidden', k !== 'world_unlock');
     };
     itemKindEl.addEventListener('change', syncItemInputs);
     syncItemInputs();
@@ -575,6 +629,12 @@
         weaponLevel: Number(document.getElementById('itemWeaponLvl').value),
         arrowId: document.getElementById('itemArrowId').value,
         armorLevel: Number(document.getElementById('itemArmorLvl').value),
+        heartsLevel: Number(document.getElementById('itemHeartsLvl').value),
+        statBoost: Number(document.getElementById('itemStatBoost').value),
+        abilityLevel: Number(document.getElementById('itemAbilityLvl').value),
+        diffTier: Number(document.getElementById('itemDiffTier').value),
+        rankBoost: Number(document.getElementById('itemRankBoost').value),
+        worldAccess: document.getElementById('itemWorldAccess').value,
         note: document.getElementById('itemNote').value.trim(),
       };
       try {
@@ -584,7 +644,13 @@
           ? `🎲 Lucky Drop (${g.weaponId} Lv${g.weaponLevel} + ${g.amount} CR)`
           : kind === 'weapon' ? `⚔️ ${g.weaponId} Lv${g.weaponLevel}`
           : kind === 'arrow' ? `⚡ ${g.arrowId} Arrows`
-          : `🛡️ Armor Lv${g.armorLevel}`;
+          : kind === 'armor' ? `🛡️ Armor Lv${g.armorLevel}`
+          : kind === 'max_hearts' ? `❤️ Max Life → ${g.heartsLevel} ♥`
+          : kind === 'stat_boost' ? `💪 +${g.statBoost} All Stats`
+          : kind === 'ability_boost' ? `✨ All 5 Abilities → Lv${g.abilityLevel}`
+          : kind === 'difficulty_unlock' ? `🔥 Unlock ${g.diffTier >= 2 ? 'HARD' : 'MEDIUM'} Difficulty`
+          : kind === 'world_unlock' ? `🌍 World Access (${g.worldAccess === 'all_100' ? 'ALL 4 WORLDS + 100 LVLS' : g.worldAccess.toUpperCase()})`
+          : `🏆 +${g.rankBoost} Stage Rank Levels`;
         showBoxMsg(globalMsg, `Sent ${summary} to ${playerId}! They will receive it on their next mailbox sync.`, 'ok');
         await loadDashboard();
       } catch (err) {

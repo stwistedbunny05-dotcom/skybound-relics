@@ -2,6 +2,7 @@ import * as THREE from '../lib/three.module.min.js';
 import { audio } from './audio.js';
 import { WEAPON_CATALOG, DIFFICULTY_TIERS, getGlowTier, getEquippedItem, getEquippedArrow, getItemDamage, getGuildDifficulty } from './state.js';
 import { makeCharacterTextures } from './textures.js';
+import { makeAdditiveVfxMaterial } from './vfxAssets.js';
 
 // Shared Graphic-Artist HD Voxel Weapon Builder (all 13 fantasy weapons + layered bevels, gems, fuller & upgrade glow!)
 export function buildWeaponMesh(weaponId, upgradeLevel = 1) {
@@ -1010,8 +1011,9 @@ export class CombatSystem {
       this.allies.push({
         group: g, legL, legR, armR,
         pos: new THREE.Vector3(def.x, def.y, def.z),
-        speed: def.speed || 5.2,
-        damage: def.damage || 22,
+        style: def.style || 'ranged',
+        speed: def.speed || 5.4,
+        damage: def.damage || 24,
         yaw: 0, cooldown: 0.5, strafeDir: 1, strafeTimer: 1.5, walkCycle: 0,
       });
     }
@@ -1146,9 +1148,49 @@ export class CombatSystem {
           this.damageEnemy(e, dmg, forward, model === 'axe' ? 1.5 : 0.85);
         }
       }
+      // Hit a Safe Haven Roaming NPC Explorer -> they turn hostile & fight back!
+      for (const ai of this.world?.roamingAi || []) {
+        if (ai.defeatedTimer > 0) continue;
+        const ac = ai.pos.clone().add(new THREE.Vector3(0, 0.85, 0));
+        if (ac.distanceTo(strikeCenter) <= hitRadius) {
+          this.damageRoamingNpc(ai, dmg, forward);
+        }
+      }
       if (this.dummy && this.dummy.pos.clone().add(new THREE.Vector3(0, 0.9, 0)).distanceTo(strikeCenter) <= hitRadius) {
         this.hitDummy(dmg);
       }
+    }
+  }
+
+  // Hitting a Safe Haven Roaming NPC makes them fight back!
+  damageRoamingNpc(ai, dmg, hitDir = null) {
+    if (!ai || ai.defeatedTimer > 0) return;
+    const wasPeaceful = !ai.hostile;
+    ai.hostile = true;
+    ai.waitTimer = 0;
+    ai.calmTimer = 18.0;
+    ai.aggroRing.visible = true;
+    ai.hpSprite.visible = true;
+    ai.hp = Math.max(0, ai.hp - Math.max(8, Math.round(dmg)));
+    ai.redrawHp(ai.hp, ai.maxHp);
+    audio.playEnemyHit();
+    this.world?.spawnBurst(ai.pos.clone().add(new THREE.Vector3(0, 0.9, 0)), 0xf43f5e, 10, 4.2);
+
+    if (hitDir) {
+      ai.pos.x = Math.max(-56, Math.min(56, ai.pos.x + hitDir.x * 0.7));
+      ai.pos.z = Math.max(-52, Math.min(52, ai.pos.z + hitDir.z * 0.7));
+    }
+    if (wasPeaceful && this.cb.onNpcAggro) {
+      this.cb.onNpcAggro(ai);
+    }
+    if (ai.hp <= 0) {
+      ai.defeatedTimer = 8.0;
+      ai.hostile = false;
+      ai.aggroRing.visible = false;
+      ai.hpSprite.visible = false;
+      audio.playEnemyDie();
+      this.world?.spawnBurst(ai.pos.clone().add(new THREE.Vector3(0, 0.9, 0)), 0xfacc15, 22, 6.0);
+      if (this.cb.onNpcSparWin) this.cb.onNpcSparWin(ai);
     }
   }
 
@@ -1160,6 +1202,231 @@ export class CombatSystem {
     this.dummy.wobble = 0.35;
     this.dummy.hpUi.redraw(this.dummy.hp);
     this.world.spawnBurst(this.dummy.pos.clone().add(new THREE.Vector3(0, 1.1, 0)), 0xfacc15, 8, 3.8);
+  }
+
+  // Ability #3: Shockwave Slam (Sculpted 3D Erupting Volcanic Crater Spikes + Twin Expanding Shockwave Rings!)
+  castShockwaveSlam(player, stats) {
+    const baseDmg = getItemDamage(this.saveState);
+    const airBonus = player.onGround ? 1.0 : 1.25;
+    const dmg = Math.max(12, Math.round(baseDmg * stats.dmgMult * airBonus));
+    const origin = player.pos.clone();
+    audio.playBounce();
+    audio.playPunch();
+
+    // Custom Additive-Blending Molten Magma Crater & Shockwave VFX Decal!
+    const slamDecal = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.2, 3.2),
+      makeAdditiveVfxMaterial('shockwaveSlam', 0.98)
+    );
+    slamDecal.rotation.x = -Math.PI / 2;
+    slamDecal.position.set(origin.x, origin.y + 0.14, origin.z);
+    this.root.add(slamDecal);
+    this.slashEffects.push({ mesh: slamDecal, life: 0.62, maxLife: 0.62, expand: true, maxScale: stats.radius * 0.52, spin: 0.9 });
+
+    // Twin expanding 3D fiery shockwave rings!
+    for (const [col, maxSc, life] of [[0xf97316, stats.radius * 0.95, 0.45], [0xfacc15, stats.radius * 0.72, 0.36]]) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.45, 0.95, 28),
+        new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide, transparent: true, opacity: 0.94 })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(origin.x, origin.y + 0.16, origin.z);
+      this.root.add(ring);
+      this.slashEffects.push({ mesh: ring, life, maxLife: life, expand: true, maxScale: maxSc });
+    }
+
+    // Sculpted 3D Radial Erupting Magma-Stone Crater Spikes!
+    const crater = new THREE.Group();
+    crater.position.set(origin.x, origin.y, origin.z);
+    const mRock = new THREE.MeshBasicMaterial({ color: 0x1e293b, transparent: true, opacity: 0.95 });
+    const mLava = new THREE.MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.96 });
+    const mTip = new THREE.MeshBasicMaterial({ color: 0xfef08a, transparent: true, opacity: 0.98 });
+    for (let k = 0; k < 8; k++) {
+      const ang = (k / 8) * Math.PI * 2;
+      const dist = 1.35 + (k % 2) * 0.45;
+      const spike = new THREE.Group();
+      spike.position.set(Math.cos(ang) * dist, 0.15, Math.sin(ang) * dist);
+      spike.rotation.y = -ang;
+      spike.rotation.z = -0.35;
+      const base = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.95, 0.42), mRock);
+      base.position.y = 0.42;
+      const glow = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.55, 0.28), mLava);
+      glow.position.y = 0.88;
+      const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), mTip);
+      tip.position.y = 1.24;
+      spike.add(base, glow, tip);
+      crater.add(spike);
+    }
+    this.root.add(crater);
+    this.slashEffects.push({ mesh: crater, life: 0.58, maxLife: 0.58, expand: true, maxScale: 0.95, spin: 0.6 });
+    this.world.spawnBurst(origin.clone().add(new THREE.Vector3(0, 0.5, 0)), 0xf97316, 28, 7.6);
+
+    let hits = 0;
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const dist = Math.hypot(e.pos.x - origin.x, e.pos.z - origin.z);
+      if (dist <= stats.radius && Math.abs(e.pos.y - origin.y) <= 4.5) {
+        const dir = new THREE.Vector3(e.pos.x - origin.x, 0, e.pos.z - origin.z);
+        if (dir.lengthSq() > 0.001) dir.normalize(); else dir.set(0, 0, -1);
+        this.damageEnemy(e, dmg, dir, stats.knock);
+        hits++;
+      }
+    }
+    if (this.dummy && Math.hypot(this.dummy.pos.x - origin.x, this.dummy.pos.z - origin.z) <= stats.radius + 1.0) {
+      this.hitDummy(dmg);
+      hits++;
+    }
+    for (const ai of this.world?.roamingAi || []) {
+      if (ai.defeatedTimer > 0) continue;
+      if (Math.hypot(ai.pos.x - origin.x, ai.pos.z - origin.z) <= stats.radius) {
+        const dir = new THREE.Vector3(ai.pos.x - origin.x, 0, ai.pos.z - origin.z).normalize();
+        this.damageRoamingNpc(ai, dmg, dir);
+        hits++;
+      }
+    }
+    return hits;
+  }
+
+  // Ability #4 Lv6+: Aegis Shield Thorns Counter-Burst
+  castAegisThorns(player, stats) {
+    const dmg = Math.max(8, Math.round(getItemDamage(this.saveState) * stats.thornsMult));
+    const origin = player.pos.clone();
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.5, 0.85, 22),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(origin.x, origin.y + 0.5, origin.z);
+    this.root.add(ring);
+    this.slashEffects.push({ mesh: ring, life: 0.28, maxLife: 0.28, expand: true, maxScale: 4.2 });
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const d = Math.hypot(e.pos.x - origin.x, e.pos.z - origin.z);
+      if (d <= 5.2 && Math.abs(e.pos.y - origin.y) <= 3.5) {
+        const dir = new THREE.Vector3(e.pos.x - origin.x, 0, e.pos.z - origin.z).normalize();
+        this.damageEnemy(e, dmg, dir, 1.8);
+      }
+    }
+  }
+
+  // Ability #2: Triple Jump Sculpted 3D Emerald-Gold Wind-Vortex Ring & Updraft Blades (+ enemy knockback at Lv5+!)
+  castTripleJumpPush(player, tj) {
+    const origin = player.pos.clone();
+    const vortex = new THREE.Group();
+    vortex.position.set(origin.x, origin.y + 0.12, origin.z);
+    // Custom Additive-Blending Emerald-Gold Wind-Vortex Burst VFX Decal!
+    const windDecal = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.0, 3.0),
+      makeAdditiveVfxMaterial('tripleJump', 0.98)
+    );
+    windDecal.rotation.x = -Math.PI / 2;
+    windDecal.position.y = 0.04;
+    vortex.add(windDecal);
+    const outerR = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 0.92, 24),
+      new THREE.MeshBasicMaterial({ color: 0x34d399, side: THREE.DoubleSide, transparent: true, opacity: 0.92 })
+    );
+    outerR.rotation.x = -Math.PI / 2;
+    const innerR = new THREE.Mesh(
+      new THREE.RingGeometry(0.25, 0.48, 20),
+      new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })
+    );
+    innerR.rotation.x = -Math.PI / 2;
+    innerR.position.y = 0.08;
+    vortex.add(outerR, innerR);
+    const bladeMat = new THREE.MeshBasicMaterial({ color: 0xa7f3d0, transparent: true, opacity: 0.9 });
+    for (let k = 0; k < 6; k++) {
+      const ang = (k / 6) * Math.PI * 2;
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.52, 0.34), bladeMat);
+      blade.position.set(Math.cos(ang) * 0.85, 0.25, Math.sin(ang) * 0.85);
+      blade.rotation.y = -ang;
+      blade.rotation.x = 0.35;
+      vortex.add(blade);
+    }
+    this.root.add(vortex);
+    this.slashEffects.push({ mesh: vortex, life: 0.40, maxLife: 0.40, expand: true, maxScale: Math.max(2.2, tj.knockRadius * 0.72), spin: 5.5 });
+
+    if (tj.knockRadius > 0) {
+      for (const e of this.enemies) {
+        if (e.dead) continue;
+        const d = Math.hypot(e.pos.x - origin.x, e.pos.z - origin.z);
+        if (d <= tj.knockRadius && Math.abs(e.pos.y - origin.y) <= 4.0) {
+          const dir = new THREE.Vector3(e.pos.x - origin.x, 0, e.pos.z - origin.z).normalize();
+          this.damageEnemy(e, Math.max(6, Math.round(getItemDamage(this.saveState) * 0.55)), dir, 2.2);
+        }
+      }
+    }
+  }
+
+  // Ability #5: Sky Lightning Nova (Sculpted Multi-Segment Jagged 3D Lightning Bolts + Arcane Star-Rune Circles!)
+  castSkyLightningNova(player, stats) {
+    const dmg = Math.max(24, Math.round(getItemDamage(this.saveState) * stats.dmgMult));
+    const origin = player.pos.clone();
+    audio.playDoubleJump();
+    audio.playBounce();
+
+    const spawnBoltAt = (tx, ty, tz) => {
+      const strike = new THREE.Group();
+      strike.position.set(tx, ty, tz);
+
+      // Crossed vertical High-Voltage Forked 3D Lightning Bolt planes (replaces boxy columns!)
+      for (let p = 0; p < 2; p++) {
+        const boltPlane = new THREE.Mesh(
+          new THREE.PlaneGeometry(4.4, 16.5),
+          makeAdditiveVfxMaterial('novaBolt', 1.0)
+        );
+        boltPlane.position.y = 8.25;
+        boltPlane.rotation.y = (p * Math.PI) / 2 + 0.35;
+        strike.add(boltPlane);
+      }
+
+      // Custom Additive-Blending Arcane Violet-Gold Lightning Star-Rune Magic Circle VFX Decal!
+      const novaDecal = new THREE.Mesh(
+        new THREE.PlaneGeometry(4.4, 4.4),
+        makeAdditiveVfxMaterial('skyNova', 1.0)
+      );
+      novaDecal.rotation.x = -Math.PI / 2;
+      novaDecal.position.y = 0.15;
+      strike.add(novaDecal);
+
+      // Expanding Electric Storm Plasma Shockwave Ring!
+      const novaShock = new THREE.Mesh(
+        new THREE.PlaneGeometry(3.2, 3.2),
+        makeAdditiveVfxMaterial('novaShock', 0.96)
+      );
+      novaShock.rotation.x = -Math.PI / 2;
+      novaShock.position.set(tx, ty + 0.21, tz);
+      this.root.add(novaShock);
+      this.slashEffects.push({ mesh: novaShock, life: 0.48, maxLife: 0.48, expand: true, maxScale: 1.55, spin: -3.2 });
+
+      this.root.add(strike);
+      this.slashEffects.push({ mesh: strike, life: 0.56, maxLife: 0.56, expand: false, maxScale: 1, spin: 1.8 });
+      this.world.spawnBurst(new THREE.Vector3(tx, ty + 0.8, tz), 0xc084fc, 22, 6.8);
+    };
+
+    const candidates = this.enemies
+      .filter((e) => !e.dead && Math.hypot(e.pos.x - origin.x, e.pos.z - origin.z) <= stats.radius && Math.abs(e.pos.y - origin.y) <= 8.0)
+      .sort((a, b) => a.pos.distanceTo(origin) - b.pos.distanceTo(origin))
+      .slice(0, stats.targets);
+
+    if (candidates.length > 0) {
+      for (const e of candidates) {
+        spawnBoltAt(e.pos.x, e.pos.y, e.pos.z);
+        e.stunTimer = Math.max(e.stunTimer || 0, e.isBoss ? stats.stunSec * 0.55 : stats.stunSec);
+        const dir = new THREE.Vector3(e.pos.x - origin.x, 0, e.pos.z - origin.z).normalize();
+        this.damageEnemy(e, dmg, dir, 1.4);
+      }
+    } else if (this.dummy && Math.hypot(this.dummy.pos.x - origin.x, this.dummy.pos.z - origin.z) <= stats.radius) {
+      spawnBoltAt(this.dummy.pos.x, this.dummy.pos.y, this.dummy.pos.z);
+      this.hitDummy(dmg);
+    } else {
+      // Dramatic ring of 4 sculpted sky lightning bolts around hero when cast in Safe Haven / open sky!
+      for (let k = 0; k < 4; k++) {
+        const ang = (k / 4) * Math.PI * 2 + player.facingYaw;
+        spawnBoltAt(origin.x + Math.cos(ang) * 3.8, origin.y, origin.z + Math.sin(ang) * 3.8);
+      }
+    }
+    return candidates.length;
   }
 
   damageEnemy(e, dmg, hitDir, knockMult = 0.85) {
@@ -1365,6 +1632,11 @@ export class CombatSystem {
       if (e.dead) continue;
       e.cooldown = Math.max(0, e.cooldown - dt);
       e.dashCd = Math.max(0, (e.dashCd || 0) - dt);
+      if (e.stunTimer > 0) {
+        e.stunTimer = Math.max(0, e.stunTimer - dt);
+        e.bodyMat.color.setHex(Math.floor(elapsed * 20) % 2 === 0 ? 0xe879f9 : 0xfef08a);
+        continue;
+      }
       e.strafeTimer = (e.strafeTimer || 1.2) - dt;
       if (e.strafeTimer <= 0) {
         e.strafeTimer = 1.1 + Math.random() * 1.4;
@@ -1569,16 +1841,27 @@ export class CombatSystem {
       }
     }
 
-    // 1b. Update AI Guildmate Allies (assist you in Sky Arena Guild Skirmishes!)
-    for (const al of this.allies) {
+    // 1b. Update Invited AI Party Companions & Guildmate Allies (fight alongside you across ALL 4 Worlds & Arena!)
+    for (let alIdx = 0; alIdx < this.allies.length; alIdx++) {
+      const al = this.allies[alIdx];
       al.cooldown = Math.max(0, al.cooldown - dt);
       al.strafeTimer -= dt;
       if (al.strafeTimer <= 0) { al.strafeTimer = 1.4; al.strafeDir = -al.strafeDir; }
 
+      // Sky-Warp companion smoothly beside player if player jumped/glided to a distant island or climbed a Spiral Tower!
+      const pDist = al.pos.distanceTo(player.pos);
+      const pVert = Math.abs(al.pos.y - player.pos.y);
+      if (player.onGround && (pDist > 16.5 || pVert > 3.6)) {
+        const ang = (alIdx + 1) * 2.1;
+        al.pos.set(player.pos.x + Math.cos(ang) * 1.9, player.pos.y, player.pos.z + Math.sin(ang) * 1.9);
+        this.world?.spawnBurst(al.pos.clone().add(new THREE.Vector3(0, 0.8, 0)), 0x38bdf8, 8, 3.2);
+      }
+
       let target = null;
-      let bestD = Infinity;
+      let bestD = 24.0;
       for (const e of this.enemies) {
         if (e.dead) continue;
+        if (Math.abs(e.pos.y - al.pos.y) > 6.0) continue;
         const d = al.pos.distanceTo(e.pos);
         if (d < bestD) { bestD = d; target = e; }
       }
@@ -1587,32 +1870,113 @@ export class CombatSystem {
         const dz = target.pos.z - al.pos.z;
         const dist = Math.hypot(dx, dz) || 1;
         al.yaw = Math.atan2(dx, dz);
-        const kite = dist < 7.5 ? -0.75 : (dist > 14 ? 0.6 : 0);
-        const mx = (dx / dist) * kite + (-dz / dist) * al.strafeDir * 0.85;
-        const mz = (dz / dist) * kite + (dx / dist) * al.strafeDir * 0.85;
+        const isMelee = al.style === 'melee';
+        const moveScale = isMelee ? (dist > 2.3 ? 1.0 : 0.1) : (dist < 6.5 ? -0.6 : (dist > 13 ? 0.65 : 0));
+        const mx = (dx / dist) * moveScale + (-dz / dist) * al.strafeDir * (isMelee ? 0.35 : 0.75);
+        const mz = (dz / dist) * moveScale + (dx / dist) * al.strafeDir * (isMelee ? 0.35 : 0.75);
         const ml = Math.hypot(mx, mz) || 1;
-        al.pos.x = Math.max(-17, Math.min(17, al.pos.x + (mx / ml) * al.speed * dt));
-        al.pos.z = Math.max(-17, Math.min(17, al.pos.z + (mz / ml) * al.speed * dt));
+        const nextX = al.pos.x + (mx / ml) * al.speed * dt;
+        const nextZ = al.pos.z + (mz / ml) * al.speed * dt;
+        // Stay safely near player / current battleground so companion never walks off a cliff!
+        if (Math.hypot(nextX - player.pos.x, nextZ - player.pos.z) < 15.5) {
+          al.pos.x = nextX;
+          al.pos.z = nextZ;
+        }
         al.walkCycle += dt * al.speed * 1.9;
-        if (al.cooldown <= 0 && dist < 26) {
-          al.cooldown = 1.05;
-          const muzzle = al.pos.clone().add(new THREE.Vector3(0, 1.0, 0));
-          const aim = target.pos.clone().add(new THREE.Vector3(0, 0.9, 0)).sub(muzzle).normalize();
-          const bolt = buildHeroArrowMesh('iron');
-          bolt.position.copy(muzzle);
-          bolt.lookAt(muzzle.clone().add(aim));
-          this.root.add(bolt);
-          this.projectiles.push({
-            mesh: bolt, pos: muzzle, vel: aim.multiplyScalar(22),
-            gravity: 0.35, fromPlayer: true, damage: al.damage, life: 1.8, color: 0x38bdf8, spin: false, isArrow: true,
-          });
+        if (al.cooldown <= 0) {
+          if (isMelee && dist < 3.1) {
+            al.cooldown = 0.85;
+            al.armR.rotation.x = -1.65;
+            this.damageEnemy(target, al.damage, new THREE.Vector3(dx / dist, 0, dz / dist), 0.75);
+          } else if (!isMelee && dist < 24) {
+            al.cooldown = 1.05;
+            const muzzle = al.pos.clone().add(new THREE.Vector3(0, 1.0, 0));
+            const aim = target.pos.clone().add(new THREE.Vector3(0, 0.9, 0)).sub(muzzle).normalize();
+            const bolt = buildHeroArrowMesh('iron');
+            bolt.position.copy(muzzle);
+            bolt.lookAt(muzzle.clone().add(aim));
+            this.root.add(bolt);
+            this.projectiles.push({
+              mesh: bolt, pos: muzzle, vel: aim.multiplyScalar(22),
+              gravity: 0.35, fromPlayer: true, damage: al.damage, life: 1.8, color: 0x38bdf8, spin: false, isArrow: true,
+            });
+          }
+        }
+      } else {
+        // Follow smoothly beside the player when no enemy is nearby!
+        const followOffX = Math.cos((alIdx + 1) * 2.1) * 2.2;
+        const followOffZ = Math.sin((alIdx + 1) * 2.1) * 2.2;
+        const fdx = (player.pos.x + followOffX) - al.pos.x;
+        const fdz = (player.pos.z + followOffZ) - al.pos.z;
+        const fd = Math.hypot(fdx, fdz);
+        if (fd > 1.2) {
+          al.yaw = Math.atan2(fdx, fdz);
+          al.pos.x += (fdx / fd) * Math.min(fd, al.speed * dt);
+          al.pos.z += (fdz / fd) * Math.min(fd, al.speed * dt);
+          al.walkCycle += dt * al.speed * 1.7;
         }
       }
+      al.armR.rotation.x *= 0.86;
       al.group.position.copy(al.pos);
       al.group.rotation.y = al.yaw;
       const sw = Math.sin(al.walkCycle) * 0.48;
       al.legL.rotation.x = sw;
       al.legR.rotation.x = -sw;
+    }
+
+    // 1c. Update Hostile Safe Haven Roaming NPCs (fight back when hit by the player!)
+    for (const ai of this.world?.roamingAi || []) {
+      if (!ai.hostile || ai.defeatedTimer > 0) continue;
+      ai.attackCd = Math.max(0, (ai.attackCd || 0) - dt);
+      ai.calmTimer = Math.max(0, (ai.calmTimer || 0) - dt);
+      const dx = player.pos.x - ai.pos.x;
+      const dz = player.pos.z - ai.pos.z;
+      const dist = Math.hypot(dx, dz) || 1;
+      if (dist > 24.0 || ai.calmTimer <= 0 || player.hp <= 0) {
+        ai.hostile = false;
+        ai.hp = ai.maxHp;
+        ai.aggroRing.visible = false;
+        ai.hpSprite.visible = false;
+        continue;
+      }
+      ai.yaw = Math.atan2(dx, dz);
+      ai.aggroRing.rotation.z = elapsed * 2.8;
+      const isRanged = ai.profile?.style === 'ranged';
+      const chaseSpeed = (ai.speed || 4.0) * 1.18;
+      if (isRanged) {
+        const kite = dist < 5.5 ? -0.7 : (dist > 11.5 ? 0.85 : 0.1);
+        ai.pos.x = Math.max(-56, Math.min(56, ai.pos.x + (dx / dist) * kite * chaseSpeed * dt));
+        ai.pos.z = Math.max(-52, Math.min(52, ai.pos.z + (dz / dist) * kite * chaseSpeed * dt));
+        if (ai.attackCd <= 0 && dist < 18.0) {
+          ai.attackCd = 1.35;
+          ai.armR.rotation.x = -1.55;
+          const muzzle = ai.pos.clone().add(new THREE.Vector3(0, 1.0, 0));
+          const aim = playerCenter.clone().sub(muzzle).normalize();
+          const bolt = buildEnemyArrowMesh(0xf43f5e);
+          bolt.position.copy(muzzle);
+          bolt.lookAt(muzzle.clone().add(aim));
+          this.root.add(bolt);
+          this.projectiles.push({
+            mesh: bolt, pos: muzzle, vel: aim.multiplyScalar(17.5),
+            gravity: 0.4, fromPlayer: false, damage: 1, life: 1.8, color: 0xf43f5e, spin: false, isArrow: true,
+          });
+        }
+      } else {
+        if (dist > 1.85) {
+          ai.pos.x = Math.max(-56, Math.min(56, ai.pos.x + (dx / dist) * chaseSpeed * dt));
+          ai.pos.z = Math.max(-52, Math.min(52, ai.pos.z + (dz / dist) * chaseSpeed * dt));
+        } else if (ai.attackCd <= 0) {
+          ai.attackCd = 1.15;
+          ai.armR.rotation.x = -1.75;
+          player.takeDamage(1, new THREE.Vector3(dx / dist, 0, dz / dist));
+        }
+      }
+      ai.walkCycle += dt * chaseSpeed * 1.9;
+      const sw = Math.sin(ai.walkCycle) * 0.58;
+      ai.legL.rotation.x = sw; ai.legR.rotation.x = -sw;
+      ai.armR.rotation.x *= 0.86;
+      ai.group.position.set(ai.pos.x, ai.pos.y + ai.jumpY, ai.pos.z);
+      ai.group.rotation.y = ai.yaw;
     }
 
     // 2. Projectiles (checked against water ponds/fountain FIRST for splashes, then solid colliders & enemies!)
@@ -1667,6 +2031,16 @@ export class CombatSystem {
         if (!remove && this.dummy && p.pos.distanceTo(this.dummy.pos.clone().add(new THREE.Vector3(0, 1.0, 0))) < 0.95) {
           this.hitDummy(p.damage);
           remove = true;
+        }
+        if (!remove) {
+          for (const ai of this.world?.roamingAi || []) {
+            if (ai.defeatedTimer > 0) continue;
+            if (p.pos.distanceTo(ai.pos.clone().add(new THREE.Vector3(0, 0.9, 0))) < 0.95) {
+              this.damageRoamingNpc(ai, p.damage, new THREE.Vector3(p.vel.x, 0, p.vel.z).normalize());
+              remove = true;
+              break;
+            }
+          }
         }
       } else if (!remove && !p.fromPlayer && player.hp > 0) {
         if (p.pos.distanceTo(playerCenter) < 0.75) {
@@ -1779,20 +2153,27 @@ export class CombatSystem {
       }
     }
 
-    // 5. Slash VFX
+    // 5. Slash & 3D Sculpted Ability VFX (handles single Meshes AND multi-part Groups cleanly!)
     for (let i = this.slashEffects.length - 1; i >= 0; i--) {
       const s = this.slashEffects[i];
       s.life -= dt;
       if (s.life <= 0) {
         this.root.remove(s.mesh);
-        s.mesh.geometry.dispose();
-        s.mesh.material.dispose();
+        this.disposeObject(s.mesh);
         this.slashEffects.splice(i, 1);
         continue;
       }
       const prog = 1 - s.life / s.maxLife;
       if (s.expand) s.mesh.scale.setScalar(1 + prog * s.maxScale);
-      s.mesh.material.opacity = 1 - prog;
+      if (s.spin) s.mesh.rotation.y += s.spin * dt;
+      const op = Math.max(0, 1 - prog);
+      if (s.mesh.material) {
+        s.mesh.material.opacity = op;
+      } else {
+        s.mesh.traverse?.((o) => {
+          if (o.isMesh && o.material && 'opacity' in o.material) o.material.opacity = op;
+        });
+      }
     }
   }
 }

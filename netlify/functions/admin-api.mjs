@@ -169,6 +169,28 @@ export default async (req, context) => {
       } else if (kind === "armor") {
         const armorLevel = Math.max(2, Math.min(6, Math.floor(Number(body?.armorLevel) || 6)));
         gift = { ...gift, armorLevel };
+      } else if (kind === "max_hearts") {
+        const heartsLevel = Math.max(4, Math.min(6, Math.floor(Number(body?.heartsLevel) || 6)));
+        gift = { ...gift, heartsLevel };
+      } else if (kind === "stat_boost") {
+        const statBoost = Math.max(1, Math.min(10, Math.floor(Number(body?.statBoost) || 2)));
+        gift = { ...gift, statBoost };
+      } else if (kind === "ability_boost") {
+        const abilityLevel = Math.max(2, Math.min(9, Math.floor(Number(body?.abilityLevel) || 6)));
+        gift = { ...gift, abilityLevel };
+      } else if (kind === "difficulty_unlock") {
+        const diffTier = Math.max(1, Math.min(2, Math.floor(Number(body?.diffTier) || 1)));
+        gift = { ...gift, diffTier };
+      } else if (kind === "rank_boost") {
+        const rankBoost = Math.max(5, Math.min(100, Math.floor(Number(body?.rankBoost) || 15)));
+        gift = { ...gift, rankBoost };
+      } else if (kind === "world_unlock") {
+        const VALID_WORLD_GRANTS = new Set(["beach", "desert", "dungeon", "all", "all_100"]);
+        const worldAccess = String(body?.worldAccess || "all").trim();
+        if (!VALID_WORLD_GRANTS.has(worldAccess)) {
+          return jsonRes({ ok: false, error: "Invalid world access option" }, 400);
+        }
+        gift = { ...gift, worldAccess };
       } else {
         return jsonRes({ ok: false, error: "Invalid gift type" }, 400);
       }

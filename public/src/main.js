@@ -5,17 +5,20 @@ import { createSkyDomeSystem } from './skyAndWater.js';
 import { HUD_ICONS, getWeaponIcon } from './icons.js';
 import {
   BAG_MAX_SLOTS, WORLD_ORDER, WORLD_META, DIFFICULTY_TIERS, getWorldDifficulty, getWorldDiffMaxLevel,
-  WEAPON_CATALOG, WEAPON_IDS, ARROW_TYPES,
+  WEAPON_CATALOG, WEAPON_IDS, RARE_BOSS_WEAPON_IDS, ARROW_TYPES, AI_PLAYER_PROFILES,
   AVATAR_OPTIONS, GAME_STORY, QUEST_CATALOG, STARTER_GUILDS, GUILD_MAX_MEMBERS, GUILD_BUFF_OPTIONS, ARENA_TIERS, getGuildDifficulty, getQuestProgress, getActiveTrackedQuest,
   getGlowTier, createDefaultSave, loadGameSave, writeGameSave,
   exportSaveCode, importSaveCode, getEquippedItem, addItemToBag, getItemSellPrice,
   sellBagItem, getItemDamage, getWeaponUpgradeCost, getArmorUpgradeCost,
   getStatUpgradeCost, getPlayerProgressLevel, getGearUpgradeReqLevel, getStatUpgradeReqLevel, addCredits,
+  getHeartUpgradeReqLevel, getHeartUpgradeCost, getPlayerMaxHearts,
+  ABILITY_CATALOG, ABILITY_BY_ID, getHighestUnlockedDifficultyTier, getAbilityMaxLevelForState,
+  isAbilityUnlocked, getAbilityLevel, getAbilityUpgradeCost, getAbilityStats,
 } from './state.js';
-import { buildSafeHavenDef, buildSkyArenaDef, generateBiomeLevel } from './biomes.js?v=4.7';
-import { buildLevelWorld } from './world.js?v=4.7';
+import { buildSafeHavenDef, buildSkyArenaDef, generateBiomeLevel, SAFE_HAVEN_SPAWN_POINTS } from './biomes.js?v=4.15';
+import { buildLevelWorld } from './world.js?v=4.15';
 import { CombatSystem } from './combat.js';
-import { VoxelPlayer } from './player.js?v=4.7';
+import { VoxelPlayer } from './player.js?v=4.15';
 import { MultiplayerClient } from './multiplayer.js';
 import { audio } from './audio.js';
 
@@ -26,6 +29,7 @@ const mobileControls = document.getElementById('mobileControls');
 const dragPad = document.getElementById('dragPad');
 const dragIndicator = document.getElementById('dragIndicator');
 const npcPrompt = document.getElementById('npcPrompt');
+const abilityBar = document.getElementById('abilityBar');
 
 const startOverlay = document.getElementById('startOverlay');
 const optionOverlay = document.getElementById('optionOverlay');
@@ -239,7 +243,7 @@ let toastTimer = null;
 // RPG CHATBOX SYSTEM (World / Guild / System — Multiplayer Ready!)
 // =========================================================================
 const chatMessages = [
-  { ch: 'sys', sender: 'UPDATE v4.7', text: 'NEW: Tornado Wind-Vortex Jump Pads, Crystal Checkpoint Shrines, Sculpted Axe/Sword/Dagger/Spear, Level-Gated Store & Upgrades, Magma Burn & Zero-Overlap Islands!', color: '#34d399' },
+  { ch: 'sys', sender: 'UPDATE v4.15', text: 'NEW: All 5 Multi-Layer 3D Ability VFX, Female Hero Creator, Upgradable 6-Heart Life + HP%, Zero-Overlap Safe Haven Spawns, NPC Sparring & Party Invites (All Worlds & Arena), Seamless Enter-to-Chat & Cross-Device Account Linking!', color: '#34d399' },
   { ch: 'sys', sender: 'STORY', text: 'The Sky Crown was shattered across 4 realms. Talk to Elder Rowan in Safe Haven to begin!', color: '#facc15' },
   { ch: 'all', sender: 'Elder Rowan', text: 'Welcome to Safe Haven, Explorer! Step near me and press T to take quests.', color: '#67e8f9' },
 ];
@@ -287,7 +291,11 @@ chatMinBtn.addEventListener('click', () => {
 chatForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const txt = chatInput.value.trim();
-  if (!txt) return;
+  if (!txt) {
+    // Pressing Enter on an empty chat box smoothly exits typing back to gameplay!
+    chatInput.blur();
+    return;
+  }
   const gTag = saveState.guild ? `[${saveState.guild.tag}] ` : '';
   const ch = activeChatTab === 'guild' ? 'guild' : 'all';
   if (ch === 'guild' && !saveState.guild) {
@@ -298,8 +306,10 @@ chatForm.addEventListener('submit', (e) => {
     if (typeof mp !== 'undefined' && mp) mp.sendChat(ch, txt);
   }
   chatInput.value = '';
-  chatInput.blur();
+  // Stay focused so you can keep typing/replying without clicking the chatbox again (press Esc or Enter on empty to resume game)!
+  chatInput.focus();
 });
+chatInput?.setAttribute('placeholder', 'Enter to chat · Esc to play...');
 renderChat();
 
 // =========================================================================
@@ -329,6 +339,14 @@ function renderHearts(hp, maxHp, shield = 0, regenSecs = 0) {
     sh.style.fontSize = '13px';
     heartsEl.appendChild(sh);
   }
+  const pct = Math.round((Math.max(0, hp) / Math.max(1, maxHp)) * 100);
+  const pctEl = document.createElement('span');
+  pctEl.textContent = ` ${pct}%`;
+  pctEl.style.color = pct > 65 ? '#34d399' : (pct > 34 ? '#facc15' : '#fb7185');
+  pctEl.style.fontSize = '11px';
+  pctEl.style.fontWeight = '900';
+  pctEl.style.marginLeft = '4px';
+  heartsEl.appendChild(pctEl);
   if (hp > 0 && hp < maxHp && regenSecs > 0) {
     const rg = document.createElement('span');
     rg.textContent = ` +♥ ${regenSecs}s`;
@@ -466,6 +484,13 @@ const player = new VoxelPlayer(scene, saveState, {
   onGearChange: (p) => mp.sendGear(p.pos, p.facingYaw),
   onHpChange: renderHearts,
   onHealToast: (msg) => showToast(msg, '#fb7185'),
+  onAbilityCast: (abilityId, stats) => {
+    const def = ABILITY_BY_ID[abilityId];
+    if (def) showToast(`${def.icon} ${def.name.toUpperCase()} LV.${stats.lvl}!`, def.color);
+    updateAbilityBarUi(true);
+  },
+  onAegisThorns: (p, stats) => { if (combat) combat.castAegisThorns(p, stats); },
+  onTripleJumpPush: (p, tj) => { if (combat) combat.castTripleJumpPush(p, tj); },
   onGameOver: () => { paused = true; gameOverOverlay.classList.remove('hidden'); },
   onEnterPortal: (pt) => {
     if (!pt.unlocked) { showToast('LOCKED: CLEAR PREVIOUS WORLD LV 100 FIRST!', '#fb7185'); return; }
@@ -527,6 +552,7 @@ const player = new VoxelPlayer(scene, saveState, {
     addCredits(saveState, clearBonus);
     if (lvl % 10 === 0) saveState.bossesCleared = (saveState.bossesCleared || 0) + 1;
 
+    const prevRankBeforeClear = getPlayerProgressLevel(saveState);
     if (!Array.isArray(saveState.worldDifficultyMaxLevel[wId])) {
       saveState.worldDifficultyMaxLevel[wId] = [saveState.maxLevel[wId] || 1, 1, 1];
     }
@@ -568,6 +594,14 @@ const player = new VoxelPlayer(scene, saveState, {
     }
     writeGameSave(saveState);
     refreshHud();
+    const newRankAfterClear = getPlayerProgressLevel(saveState);
+    for (const ab of ABILITY_CATALOG) {
+      if (prevRankBeforeClear < ab.reqLevel && newRankAfterClear >= ab.reqLevel) {
+        addChatMsg('sys', 'ABILITY UNLOCKED', `${ab.icon} ${ab.name} unlocked FREE at Rank Lv.${ab.reqLevel}! Enhance it in STORE → UPGRADES.`, ab.color);
+        showToast(`NEW ABILITY UNLOCKED: ${ab.name.toUpperCase()}!`, ab.color);
+      }
+    }
+    updateAbilityBarUi(true);
     addChatMsg('sys', 'CLEAR', `${WORLD_META[wId].name} [${wDiff.name}] Lv.${lvl} cleared! +${clearBonus} CR`, '#34d399');
 
     if (lvl % 10 === 0) {
@@ -661,6 +695,18 @@ function enterStage(worldId, levelNum = 0) {
       refreshHud();
       if (isBoss) addChatMsg('sys', 'BOSS', 'Warden Boss defeated! Collect the coin shower!', '#facc15');
     },
+    onNpcAggro: (ai) => {
+      const msg = `${ai.name}: "Hey! Watch where you swing — let's spar!"`;
+      showToast(`${ai.name.toUpperCase()} IS FIGHTING BACK!`, '#f43f5e');
+      addChatMsg('sys', 'SPAR', msg, '#f43f5e');
+    },
+    onNpcSparWin: (ai) => {
+      addCredits(saveState, 10);
+      writeGameSave(saveState);
+      refreshHud();
+      showToast(`DEFEATED ${ai.name.toUpperCase()} IN SPAR! +10 CR`, '#facc15');
+      addChatMsg('sys', 'SPAR', `${ai.name}: "Whoa, nice moves! You win! (+10 CR)"`, '#facc15');
+    },
     onWeaponLooted: (weaponId) => {
       const wDef = WEAPON_CATALOG[weaponId];
       const res = addItemToBag(saveState, weaponId, 1);
@@ -680,9 +726,56 @@ function enterStage(worldId, levelNum = 0) {
   if (def.dummy) combat.spawnTrainingDummy(def.dummy);
   if (def.heartStones?.length) combat.spawnHeartStones(def.heartStones);
   if (def.enemies?.length) combat.spawnEnemies(def.enemies);
-  if (def.allies?.length) combat.spawnAllies(def.allies);
 
-  player.setWorld(world, def.spawn, true);
+  // Combine Arena/Guild allies + Invited Safe Haven NPC Party Companions across ALL 4 Worlds & Duel Arena!
+  const combinedAllies = [...(def.allies || [])];
+  if (worldId !== 'haven' && Array.isArray(saveState.partyIds) && saveState.partyIds.length > 0) {
+    const baseDmg = Math.max(18, Math.round(getItemDamage(saveState) * 0.72));
+    saveState.partyIds.slice(0, 2).forEach((pName, idx) => {
+      const prof = AI_PLAYER_PROFILES.find((p) => p.name.toLowerCase() === String(pName).toLowerCase());
+      if (!prof) return;
+      const side = idx === 0 ? -2.1 : 2.1;
+      combinedAllies.push({
+        x: def.spawn[0] + side,
+        y: Math.max(0, def.spawn[1] - 1.15),
+        z: def.spawn[2] + 0.6,
+        name: `[PARTY] ${prof.name}`,
+        tunic: prof.tunic,
+        cape: prof.cape,
+        skin: prof.skin,
+        hatColor: prof.hatColor,
+        weapon: prof.weapon,
+        weaponLvl: prof.weaponLvl || 3,
+        style: prof.style || 'ranged',
+        speed: 5.8,
+        damage: baseDmg,
+      });
+    });
+  }
+  if (combinedAllies.length) combat.spawnAllies(combinedAllies);
+
+  // Non-Overlapping Random Safe Haven Spawn (characters can spawn anywhere open in Safe Haven without layering!)
+  let spawnCoords = def.spawn;
+  if (worldId === 'haven' && Array.isArray(SAFE_HAVEN_SPAWN_POINTS) && SAFE_HAVEN_SPAWN_POINTS.length) {
+    const occupied = [];
+    for (const ai of world.roamingAi || []) occupied.push({ x: ai.pos.x, z: ai.pos.z });
+    if (mp?.remotePlayers) {
+      for (const rp of mp.remotePlayers.values()) {
+        if (rp?.pos) occupied.push({ x: rp.pos.x, z: rp.pos.z });
+      }
+    }
+    const shuffled = [...SAFE_HAVEN_SPAWN_POINTS].sort(() => Math.random() - 0.5);
+    const freeSpot = shuffled.find(([sx, , sz]) => occupied.every((o) => Math.hypot(o.x - sx, o.z - sz) >= 2.8));
+    if (freeSpot) {
+      spawnCoords = freeSpot;
+    } else {
+      const base = shuffled[0];
+      const jitterAng = Math.random() * Math.PI * 2;
+      spawnCoords = [base[0] + Math.cos(jitterAng) * 2.4, base[1], base[2] + Math.sin(jitterAng) * 2.4];
+    }
+  }
+
+  player.setWorld(world, spawnCoords, true);
   mp.setZone(worldId, activeLevelNum, player.pos, player.facingYaw);
   paused = false;
   closeAllMenus();
@@ -787,6 +880,72 @@ function getQuestWaypointTarget(q, done) {
     return { pos: world.goalRelic.pos, label: world.goalRelic.sealed ? 'Defeat Guardians to unseal Relic' : 'Claim the Sky Relic!' };
   }
   return { pos: null, label: q.waypointHint || q.desc };
+}
+
+let lastAbilityBarKey = '';
+function updateAbilityBarUi(force = false) {
+  if (!abilityBar) return;
+  const visible = started && !paused && !openMenu && !creatingCharacter;
+  if (!visible) {
+    abilityBar.classList.add('hidden');
+    return;
+  }
+  const unlockedList = ABILITY_CATALOG.filter((ab) => isAbilityUnlocked(saveState, ab.id));
+  if (unlockedList.length === 0) {
+    abilityBar.classList.add('hidden');
+    return;
+  }
+  abilityBar.classList.remove('hidden');
+
+  const parts = [];
+  for (const ab of unlockedList) {
+    const lvl = getAbilityLevel(saveState, ab.id);
+    const cd = ab.type === 'active' ? Math.ceil((player.abilityCooldowns[ab.id] || 0) * 10) / 10 : 0;
+    const activeGlow = (ab.id === 'aegisShield' && player.aegisTimer > 0) || (ab.id === 'skyGlide' && player.isGliding);
+    parts.push(`${ab.id}:${lvl}:${cd > 0 ? cd.toFixed(1) : '0'}:${activeGlow ? 1 : 0}`);
+  }
+  const key = parts.join('|');
+  if (!force && key === lastAbilityBarKey) return;
+  lastAbilityBarKey = key;
+
+  abilityBar.innerHTML = '';
+  for (const ab of unlockedList) {
+    const lvl = getAbilityLevel(saveState, ab.id);
+    if (ab.type === 'passive') {
+      const pill = document.createElement('div');
+      const glowing = ab.id === 'skyGlide' && player.isGliding;
+      pill.className = 'ab-slot passive-pill' + (glowing ? ' active-glow' : '');
+      pill.style.borderColor = ab.color;
+      pill.title = `${ab.name} Lv.${lvl} (${ab.keyLabel} / ${ab.padLabel}) — ${ab.desc}`;
+      pill.innerHTML =
+        `<div class="ab-key" style="color:${ab.color};">LV.${lvl}</div>` +
+        `<img class="ab-img" src="${ab.iconImg}" alt="${ab.name}" />` +
+        `<div class="ab-name">${ab.short}</div>` +
+        `<div class="ab-cd">${ab.keyLabel}</div>`;
+      abilityBar.appendChild(pill);
+    } else {
+      const cd = player.abilityCooldowns[ab.id] || 0;
+      const shieldActive = ab.id === 'aegisShield' && player.aegisTimer > 0;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ab-slot' + (shieldActive ? ' active-glow' : '');
+      btn.style.borderColor = cd > 0 ? '#475569' : ab.color;
+      btn.disabled = cd > 0;
+      btn.title = `${ab.name} Lv.${lvl} [${ab.keyLabel} / ${ab.padLabel}] — ${ab.desc}`;
+      btn.innerHTML =
+        `<div class="ab-key" style="color:${ab.color};">[${ab.keyLabel}] LV.${lvl}</div>` +
+        `<img class="ab-img" src="${ab.iconImg}" alt="${ab.name}" />` +
+        `<div class="ab-name">${ab.short}</div>` +
+        `<div class="ab-cd" style="color:${shieldActive ? '#facc15' : (cd > 0 ? '#fb7185' : '#34d399')};">${shieldActive ? `${player.aegisTimer.toFixed(1)}s ON` : (cd > 0 ? `${cd.toFixed(1)}s` : 'READY')}</div>`;
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        audio.unlock();
+        player.triggerAbility(ab.id, combat);
+      });
+      abilityBar.appendChild(btn);
+    }
+  }
 }
 
 function getCompassArrow(targetPos) {
@@ -1012,17 +1171,61 @@ function renderNpcModal() {
   if (!activeNpc) return;
   document.getElementById('npcModalName').textContent = activeNpc.name.toUpperCase();
   document.getElementById('npcModalRole').textContent = activeNpc.role;
-  document.getElementById('npcDialogueBox').textContent = `"${activeNpc.greeting}"`;
 
   const qList = document.getElementById('npcQuestList');
   qList.innerHTML = '';
+  npcActionBtn.classList.add('hidden');
+  npcActionBtn.onclick = null;
+
+  // Invited Safe Haven Roaming AI Explorer -> Party Invite for ALL 4 Worlds & Duel Arena!
+  if (activeNpc.isExplorer && activeNpc.profile) {
+    if (!Array.isArray(saveState.partyIds)) saveState.partyIds = [];
+    const pName = activeNpc.profile.name;
+    const inParty = saveState.partyIds.some((n) => String(n).toLowerCase() === pName.toLowerCase());
+    const wDef = WEAPON_CATALOG[activeNpc.profile.weapon] || WEAPON_CATALOG.sword;
+    const styleLabel = activeNpc.profile.style === 'ranged' ? 'Ranged Marksman' : 'Melee Vanguard';
+    document.getElementById('npcDialogueBox').textContent = inParty
+      ? `"I'm in your Party! Enter any Sky World or Duel Arena and I'll fight right beside you!"`
+      : `"Hey Explorer! I wield a ${wDef.name} (${styleLabel}). Invite me to your Party to raid Sky Worlds & Duel Arena together — or swing at me if you want a friendly spar!"`;
+
+    const info = document.createElement('div');
+    info.className = 'item-row';
+    info.innerHTML =
+      `<div class="item-info"><b>Active Party (${saveState.partyIds.length}/2):</b> ${saveState.partyIds.length ? saveState.partyIds.map((x) => escHtml(x)).join(', ') : 'Solo Explorer'}<br>` +
+      `<span style="font-size:10px;opacity:0.82;">Companions join you automatically across Sky Forest, Beach, Desert, Dungeon &amp; Duel Arena!</span></div>`;
+    qList.appendChild(info);
+
+    npcActionBtn.classList.remove('hidden');
+    if (inParty) {
+      npcActionBtn.textContent = 'LEAVE PARTY';
+      npcActionBtn.onclick = () => {
+        saveState.partyIds = saveState.partyIds.filter((n) => String(n).toLowerCase() !== pName.toLowerCase());
+        writeGameSave(saveState);
+        showToast(`${pName.toUpperCase()} LEFT YOUR PARTY`, '#facc15');
+        addChatMsg('sys', 'PARTY', `${pName} left your adventure party.`, '#facc15');
+        renderNpcModal();
+      };
+    } else {
+      npcActionBtn.textContent = saveState.partyIds.length >= 2 ? 'SWAP INTO PARTY (2/2)' : 'INVITE TO PARTY';
+      npcActionBtn.onclick = () => {
+        if (saveState.partyIds.length >= 2) saveState.partyIds.shift();
+        saveState.partyIds.push(pName);
+        writeGameSave(saveState);
+        audio.playUpgrade();
+        showToast(`${pName.toUpperCase()} JOINED YOUR PARTY!`, '#34d399');
+        addChatMsg('sys', 'PARTY', `${pName} (${styleLabel}) joined your party for all Sky Worlds & Duel Arena!`, '#34d399');
+        renderNpcModal();
+      };
+    }
+    return;
+  }
+
+  document.getElementById('npcDialogueBox').textContent = `"${activeNpc.greeting}"`;
   const npcQuests = QUEST_CATALOG.filter((q) => q.npcId === activeNpc.id);
   for (const q of npcQuests) {
     qList.appendChild(buildQuestRow(q, renderNpcModal));
   }
 
-  npcActionBtn.classList.add('hidden');
-  npcActionBtn.onclick = null;
   if (activeNpc.id === 'merchant') {
     npcActionBtn.textContent = 'OPEN STORE';
     npcActionBtn.classList.remove('hidden');
@@ -1587,11 +1790,40 @@ function renderAvatarPanel(resetNameInput = false) {
       el.appendChild(b);
     }
   };
+  const isFemale = av.gender === 'female';
+  const genderRow = document.getElementById('avGenderRow');
+  if (genderRow) {
+    genderRow.innerHTML = '';
+    for (const gOpt of AVATAR_OPTIONS.gender) {
+      const b = document.createElement('button');
+      b.className = 'chip-btn' + ((av.gender || 'male') === gOpt.id ? ' active' : '');
+      b.textContent = gOpt.id === 'female' ? '♀ Female' : '♂ Male';
+      b.addEventListener('click', () => {
+        av.gender = gOpt.id;
+        if (gOpt.id === 'female') {
+          av.beard = 'none';
+          const validF = AVATAR_OPTIONS.femaleHairStyle.some((x) => x.id === av.hairStyle);
+          if (!validF) av.hairStyle = 'ponytail';
+        } else {
+          const validM = AVATAR_OPTIONS.hairStyle.some((x) => x.id === av.hairStyle);
+          if (!validM) av.hairStyle = 'hat';
+        }
+        player.refreshAvatarVisuals();
+        writeGameSave(saveState);
+        renderAvatarPanel();
+      });
+      genderRow.appendChild(b);
+    }
+  }
   makeSwatches('avSkinRow', AVATAR_OPTIONS.skin, 'skin');
   makeChips('avEmotionRow', AVATAR_OPTIONS.emotion, 'emotion');
-  makeChips('avHairStyleRow', AVATAR_OPTIONS.hairStyle, 'hairStyle');
+  makeChips('avHairStyleRow', isFemale ? AVATAR_OPTIONS.femaleHairStyle : AVATAR_OPTIONS.hairStyle, 'hairStyle');
   makeSwatches('avHairColorRow', AVATAR_OPTIONS.hairColor, 'hairColor');
-  makeChips('avBeardRow', AVATAR_OPTIONS.beard, 'beard');
+  const hairColLbl = document.getElementById('avHairColorLbl');
+  if (hairColLbl) hairColLbl.textContent = isFemale ? 'HAIR COLOR' : 'HAIR & BEARD COLOR';
+  const beardSec = document.getElementById('avBeardSection');
+  if (beardSec) beardSec.classList.toggle('hidden', isFemale);
+  if (!isFemale) makeChips('avBeardRow', AVATAR_OPTIONS.beard, 'beard');
   makeChips('avOutfitRow', AVATAR_OPTIONS.outfit, 'outfit');
 }
 
@@ -1726,6 +1958,8 @@ function renderShopPanel() {
       for (const id of WEAPON_IDS) {
         const def = WEAPON_CATALOG[id];
         if (def.slot !== slotName) continue;
+        // Rare Boss Weapons cannot be bought in the Store — only found randomly from Boss Drops (or Owner Gifts)!
+        if (RARE_BOSS_WEAPON_IDS.includes(id)) continue;
         const reqLvl = def.reqLevel || 1;
         const lvlLocked = playerRank < reqLvl;
         const canAfford = saveState.credits >= def.buyCost;
@@ -1785,6 +2019,90 @@ function renderShopPanel() {
       }
     }
   } else if (shopTab === 'upgrades') {
+    const abDiffTier = getHighestUnlockedDifficultyTier(saveState);
+    const abDiffMeta = DIFFICULTY_TIERS[abDiffTier] || DIFFICULTY_TIERS[0];
+    const abCap = getAbilityMaxLevelForState(saveState);
+    const nextDiffHint = abDiffTier === 0
+      ? 'Unlock MEDIUM in any world for Lv.6'
+      : abDiffTier === 1
+        ? 'Unlock HARD in any world for Lv.9 MAX!'
+        : 'HARD TIER UNLOCKED · FULL LV.9 MAX!';
+    addHeader(`Hero Abilities (Auto-Unlock Free · Cap: Lv.${abCap} ${abDiffMeta.name} · ${nextDiffHint})`);
+    for (const ab of ABILITY_CATALOG) {
+      const unlocked = isAbilityUnlocked(saveState, ab.id);
+      const curLvl = unlocked ? getAbilityLevel(saveState, ab.id) : 0;
+      const stats = getAbilityStats(saveState, ab.id, unlocked ? curLvl : 1);
+      const nextLvl = Math.min(9, Math.max(1, curLvl) + 1);
+      const nextStats = getAbilityStats(saveState, ab.id, nextLvl);
+      const atHardMax = unlocked && curLvl >= 9;
+      const atDiffCap = unlocked && curLvl >= abCap && curLvl < 9;
+      const cost = getAbilityUpgradeCost(curLvl);
+      const reqDiffName = curLvl < 6 ? 'MEDIUM' : 'HARD';
+      const statusTag = !unlocked
+        ? `<span style="color:#fb7185;font-weight:700;">AUTO-UNLOCK RANK LV.${ab.reqLevel}</span>`
+        : atHardMax
+          ? `<span style="color:#facc15;font-weight:700;">LV.9 MAX</span>`
+          : atDiffCap
+            ? `<span style="color:#facc15;font-weight:700;">LV.${curLvl}/${abCap} · NEED ${reqDiffName}</span>`
+            : `<span style="color:#34d399;font-weight:700;">LV.${curLvl} → LV.${nextLvl} (CAP ${abCap})</span>`;
+      const btnText = !unlocked
+        ? `RANK LV.${ab.reqLevel}`
+        : atHardMax
+          ? 'MAXED'
+          : atDiffCap
+            ? `NEED ${reqDiffName}`
+            : `${cost} CR`;
+      const iconHtml = `<img src="${ab.iconImg}" alt="${ab.name}" style="width:36px;height:36px;border-radius:4px;border:2px solid ${ab.color};image-rendering:pixelated;flex-shrink:0;object-fit:cover;background:#0f172a;" />`;
+      addRow(
+        iconHtml,
+        `<span class="glow-dot" style="background:${ab.color};"></span><b>${ab.name}</b> [${ab.keyLabel} / ${ab.padLabel}] · ${statusTag}<br>` +
+        `<span style="font-size:10px;opacity:0.84;">${ab.desc}</span><br>` +
+        `<span style="font-size:10px;color:#bae6fd;">${unlocked ? `Now: ${stats.summary}` : `Lv.1: ${stats.summary}`}${unlocked && !atHardMax ? ` → Next: ${nextStats.summary}` : ''}</span>`,
+        btnText,
+        !unlocked || atHardMax || atDiffCap || saveState.credits < cost,
+        () => {
+          if (!unlocked || curLvl >= abCap || curLvl >= 9 || saveState.credits < cost) return;
+          addCredits(saveState, -cost);
+          if (!saveState.abilityLevels) saveState.abilityLevels = {};
+          saveState.abilityLevels[ab.id] = nextLvl;
+          audio.playUpgrade();
+          writeGameSave(saveState);
+          refreshHud();
+          updateAbilityBarUi(true);
+          renderShopPanel();
+          showToast(`${ab.icon} ${ab.name.toUpperCase()} ENHANCED → LV.${nextLvl}!`, ab.color);
+        },
+        !unlocked ? '#fb7185' : (atDiffCap ? '#facc15' : '')
+      );
+    }
+
+    addHeader(`Hero Vitality / Max Life (3 → 6 ♥ · Shows Live HP% · Rank: Lv.${playerRank})`);
+    const curHearts = getPlayerMaxHearts(saveState);
+    const nextHearts = Math.min(6, curHearts + 1);
+    const hReq = getHeartUpgradeReqLevel(nextHearts);
+    const hLocked = curHearts < 6 && playerRank < hReq;
+    const hCost = getHeartUpgradeCost(nextHearts);
+    const hReqTag = curHearts < 6 ? ` · <span style="color:${hLocked ? '#fb7185' : '#34d399'};font-weight:700;">REQ LV.${hReq}</span>` : '';
+    addRow(
+      `<span style="font-size:20px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;color:#fb7185;">♥</span>`,
+      `<b>Max Life Hearts</b> (${curHearts} ♥ → ${nextHearts} ♥ / 6 ♥ MAX)${hReqTag}<br><span style="font-size:10px;opacity:0.80;">Permanently expands your HP bar &amp; Auto Heart Regen capacity (shows live % HP!)</span>`,
+      curHearts >= 6 ? 'MAX (6 ♥)' : (hLocked ? `LOCKED LV.${hReq}` : `${hCost} CR`),
+      curHearts >= 6 || hLocked || saveState.credits < hCost,
+      () => {
+        if (curHearts >= 6 || playerRank < hReq || saveState.credits < hCost) return;
+        addCredits(saveState, -hCost);
+        saveState.maxHearts = nextHearts;
+        audio.playUpgrade();
+        player.refreshGearVisuals();
+        player.healFull();
+        writeGameSave(saveState);
+        refreshHud();
+        renderShopPanel();
+        showToast(`MAX LIFE UPGRADED → ${nextHearts} ♥ (100% HP)!`, '#fb7185');
+      },
+      hLocked ? '#fb7185' : ''
+    );
+
     addHeader(`Armor Slot (Visible 3D Plate & Glow · Your Rank: Lv.${playerRank})`);
     const aLvl = saveState.armorLevel;
     const aNext = Math.min(6, aLvl + 1);
@@ -1992,6 +2310,11 @@ async function syncPlayerMailbox(manual = false) {
         bagCount: (saveState.bagSlots || []).length,
         totalKills: saveState.totalKills || 0,
         guildName: saveState.guild ? `[${saveState.guild.tag}] ${saveState.guild.name}` : null,
+        cloudSave: {
+          ...saveState,
+          previewAll: false,
+          godMode: false,
+        },
       }),
     });
     if (!res.ok) {
@@ -2042,11 +2365,11 @@ async function syncPlayerMailbox(manual = false) {
           const tag = kind === 'lucky_drop' ? 'LUCKY DROP' : 'RARE GIFT';
           const lbl = `${wDef.name} Lv${wLvl}`;
           deliveredLabels.push(lbl);
-          addChatMsg('sys', tag, `Received ${lbl}${g.amount > 0 ? ` + ${g.amount.toLocaleString()} CR` : ''} in your Bag (${g.note})!`, '#e879f9');
+          addChatMsg('sys', tag, `Received ${lbl}${g.amount > 0 ? ` + ${g.amount.toLocaleString()} CR` : ''} in your Stash (${g.note})!`, '#e879f9');
         } else {
           addCredits(saveState, 350);
-          deliveredLabels.push(`${wDef.name} (+350 CR bag-full bonus)`);
-          addChatMsg('sys', 'MAILBOX', `Bag full for ${wDef.name} Lv${wLvl} — received +350 CR bonus instead!`, '#facc15');
+          deliveredLabels.push(`${wDef.name} (+350 CR stash-full bonus)`);
+          addChatMsg('sys', 'MAILBOX', `Stash full for ${wDef.name} Lv${wLvl} — received +350 CR bonus instead!`, '#facc15');
         }
       } else if (kind === 'arrow' && g.arrowId && saveState.arrowsOwned) {
         saveState.arrowsOwned[g.arrowId] = true;
@@ -2062,6 +2385,75 @@ async function syncPlayerMailbox(manual = false) {
         changed = true;
         deliveredLabels.push(`Armor Lv${nextLvl}`);
         addChatMsg('sys', 'RARE GIFT', `3D Armor upgraded to Lv${nextLvl} by Owner (${g.note})!`, '#fb7185');
+      } else if (kind === 'max_hearts' && g.heartsLevel) {
+        const nextH = Math.max(saveState.maxHearts || 3, Math.min(6, Number(g.heartsLevel) || 6));
+        saveState.maxHearts = nextH;
+        player.refreshGearVisuals();
+        player.healFull();
+        changed = true;
+        deliveredLabels.push(`Max Life ${nextH} ♥`);
+        addChatMsg('sys', 'UPGRADE GIFT', `Max Life upgraded to ${nextH} ♥ (100% HP) by Owner (${g.note})!`, '#fb7185');
+      } else if (kind === 'stat_boost' && g.statBoost) {
+        const add = Math.max(1, Math.min(10, Number(g.statBoost) || 1));
+        saveState.stats.str = Math.min(10, (saveState.stats.str || 1) + add);
+        saveState.stats.sta = Math.min(10, (saveState.stats.sta || 1) + add);
+        saveState.stats.spd = Math.min(10, (saveState.stats.spd || 1) + add);
+        changed = true;
+        deliveredLabels.push(`Stats +${add} (STR/STA/SPD)`);
+        addChatMsg('sys', 'UPGRADE GIFT', `Hero Stats boosted +${add} (STR ${saveState.stats.str}, STA ${saveState.stats.sta}, SPD ${saveState.stats.spd}) by Owner!`, '#34d399');
+      } else if (kind === 'ability_boost' && g.abilityLevel) {
+        const tgt = Math.max(2, Math.min(9, Number(g.abilityLevel) || 6));
+        if (!saveState.abilityLevels) saveState.abilityLevels = {};
+        for (const ab of ABILITY_CATALOG) {
+          saveState.abilityLevels[ab.id] = Math.max(saveState.abilityLevels[ab.id] || 1, tgt);
+        }
+        changed = true;
+        updateAbilityBarUi(true);
+        deliveredLabels.push(`All 5 Abilities Lv${tgt}`);
+        addChatMsg('sys', 'UPGRADE GIFT', `All 5 Hero Abilities enhanced to Lv.${tgt} by Owner (${g.note})!`, '#c084fc');
+      } else if (kind === 'difficulty_unlock' && g.diffTier) {
+        const dt = Math.max(1, Math.min(2, Number(g.diffTier) || 1));
+        for (const wId of WORLD_ORDER) {
+          saveState.worldDifficultyUnlocked[wId] = Math.max(saveState.worldDifficultyUnlocked?.[wId] || 0, dt);
+        }
+        changed = true;
+        const dName = dt >= 2 ? 'HARD' : 'MEDIUM';
+        deliveredLabels.push(`${dName} Difficulty Unlocked`);
+        addChatMsg('sys', 'UPGRADE GIFT', `${dName} Difficulty unlocked across all 4 worlds by Owner (${g.note})!`, '#f97316');
+      } else if (kind === 'rank_boost' && g.rankBoost) {
+        const addR = Math.max(5, Math.min(100, Number(g.rankBoost) || 15));
+        saveState.maxLevel.forest = Math.min(100, (saveState.maxLevel.forest || 1) + addR);
+        if (addR >= 40) { saveState.unlockedWorlds.beach = true; saveState.unlockedWorlds.desert = true; }
+        if (addR >= 100) { saveState.unlockedWorlds.beach = true; saveState.unlockedWorlds.desert = true; saveState.unlockedWorlds.dungeon = true; }
+        changed = true;
+        updateAbilityBarUi(true);
+        deliveredLabels.push(`+${addR} Stage Rank`);
+        addChatMsg('sys', 'UPGRADE GIFT', `Stage Rank boosted +${addR} by Owner (${g.note})!`, '#38bdf8');
+      } else if (kind === 'world_unlock' && g.worldAccess) {
+        const wa = String(g.worldAccess);
+        let wLabel = '';
+        if (wa === 'all_100') {
+          for (const wId of WORLD_ORDER) {
+            saveState.unlockedWorlds[wId] = true;
+            saveState.maxLevel[wId] = 100;
+            saveState.worldDifficultyUnlocked[wId] = 2;
+            saveState.worldDifficultyMaxLevel[wId] = [100, 100, 100];
+          }
+          wLabel = 'ALL 4 WORLDS + ALL 100 LEVELS + ALL DIFFICULTIES';
+        } else if (wa === 'all') {
+          for (const wId of WORLD_ORDER) saveState.unlockedWorlds[wId] = true;
+          wLabel = 'ALL 4 WORLDS UNLOCKED';
+        } else if (WORLD_ORDER.includes(wa)) {
+          saveState.unlockedWorlds[wa] = true;
+          wLabel = `${WORLD_META[wa].name.toUpperCase()} UNLOCKED`;
+        }
+        if (wLabel) {
+          changed = true;
+          updateAbilityBarUi(true);
+          deliveredLabels.push(wLabel);
+          addChatMsg('sys', 'WORLD ACCESS', `Owner granted ${wLabel} (${g.note})! Open 5 WORLDS or step through the portal in Safe Haven!`, '#34d399');
+          if (activeWorldId === 'haven') enterStage('haven', 0);
+        }
       } else if (g.amount > 0) {
         addChatMsg('sys', 'MAILBOX', `Received +${Number(g.amount).toLocaleString()} CR from Owner (${g.note})!`, '#facc15');
       }
@@ -2094,6 +2486,74 @@ async function syncPlayerMailbox(manual = false) {
     _mailboxSyncBusy = false;
   }
 }
+
+// Cross-Device Account Linking via Hero Name OR Game Account ID (SKY-XXXXXX)
+async function linkAccountFromCloud(rawQuery, statusEl = null) {
+  const q = String(rawQuery || '').trim();
+  if (q.length < 3) {
+    if (statusEl) { statusEl.textContent = 'Please enter your Hero Name or Game Account ID (e.g. SKY-XXXXXX).'; statusEl.style.color = '#fda4af'; }
+    return;
+  }
+  if (statusEl) { statusEl.textContent = 'Searching cloud accounts...'; statusEl.style.color = '#bae6fd'; }
+  try {
+    const res = await fetch('/api/player', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'link_account', query: q }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      const msg = res.status === 404 && !data.error
+        ? 'Cloud account linking activates on your live Netlify site (use Save Code offline).'
+        : (data.error || 'Could not find that account.');
+      if (statusEl) { statusEl.textContent = msg; statusEl.style.color = '#fda4af'; }
+      return;
+    }
+    if (data.cloudSave && typeof data.cloudSave === 'object') {
+      localStorage.setItem('skybound_relics_rpg_save_v4', JSON.stringify(data.cloudSave));
+      const reloaded = loadGameSave();
+      if (reloaded) Object.assign(saveState, reloaded);
+    }
+    saveState.playerId = data.playerId;
+    saveState.playerName = data.name || saveState.playerName;
+    saveState.isOwnerBadge = Boolean(data.isOwner);
+    saveState.characterCreated = true;
+    if (!IS_OWNER_BUILD) { saveState.previewAll = false; saveState.godMode = false; }
+    writeGameSave(saveState);
+    applyAutoAimUi();
+    applyAutoRegenUi();
+    player.refreshGearVisuals();
+    refreshHud();
+    updateAbilityBarUi(true);
+    if (statusEl) {
+      statusEl.textContent = `Linked ${saveState.playerName} (${saveState.playerId})! Entering Safe Haven...`;
+      statusEl.style.color = '#34d399';
+    }
+    showToast(`ACCOUNT LINKED: ${saveState.playerName.toUpperCase()} (${saveState.playerId})!`, '#34d399');
+    addChatMsg('sys', 'ACCOUNT LINKED', `Loaded ${saveState.playerName} (${saveState.playerId}) on this device!`, '#34d399');
+    if (creatingCharacter) {
+      creatingCharacter = false;
+      started = true;
+      hudTop.classList.remove('hidden');
+      chatWrap.classList.remove('hidden');
+      mobileControls.classList.remove('hidden');
+    }
+    enterStage('haven', 0);
+  } catch {
+    if (statusEl) { statusEl.textContent = 'Offline mode: online account linking activates on skybound-relics.netlify.app.'; statusEl.style.color = '#fda4af'; }
+  }
+}
+
+document.getElementById('linkDeviceAvatarBtn')?.addEventListener('click', () => {
+  const inp = document.getElementById('linkDeviceAvatarInput');
+  const msg = document.getElementById('linkDeviceAvatarMsg');
+  linkAccountFromCloud(inp?.value || '', msg);
+});
+document.getElementById('linkDeviceSaveBtn')?.addEventListener('click', () => {
+  const inp = document.getElementById('linkDeviceSaveInput');
+  const msg = document.getElementById('linkDeviceSaveMsg');
+  linkAccountFromCloud(inp?.value || '', msg);
+});
 
 async function redeemGiftCode(code) {
   try {
@@ -2128,10 +2588,10 @@ async function redeemGiftCode(code) {
       const wLvl = Math.max(1, Math.min(6, Number(data.weaponLevel) || 4));
       const resBag = addItemToBag(saveState, data.weaponId, wLvl);
       if (resBag.ok) {
-        rewardParts.push(`${data.isLuckyDrop ? 'LUCKY DROP: ' : ''}${wDef.name} Lv${wLvl} → Bag!`);
+        rewardParts.push(`${data.isLuckyDrop ? 'LUCKY DROP: ' : ''}${wDef.name} Lv${wLvl} → Stash!`);
       } else {
         addCredits(saveState, 350);
-        rewardParts.push(`Bag full (+350 CR bonus)`);
+        rewardParts.push(`Stash full (+350 CR bonus)`);
       }
     }
     if (rewardParts.length > 0) {
@@ -2339,7 +2799,8 @@ function updateCsAimUi() {
     csCrosshair.classList.remove('locked');
   }
   const activePlay = started && !paused && !openMenu && !creatingCharacter;
-  if (!activePlay || camMode !== 'mouselook') return;
+  if (!activePlay) return;
+  if (camMode !== 'mouselook' && inputMode !== 'gamepad' && !gamepadState.connected) return;
   if (combat) combat.updateCrosshairAim(camera, player, 0, 0.04, 38);
 }
 
@@ -2369,12 +2830,17 @@ const gamepadState = {
   connected: false,
   brand: 'Xbox / PlayStation',
   id: '',
-  prevButtons: [],
+  mapping: '',
+  activeIndex: -1,
+  prevActionsByIndex: {},
+  lastInputAt: 0,
 };
 
 function detectGamepadBrand(id = '') {
   const s = String(id).toLowerCase();
-  if (s.includes('dualsense') || s.includes('dualshock') || s.includes('playstation') || s.includes('sony') || s.includes('054c')) {
+  if (s.includes('dualsense') || s.includes('0ce6') || s.includes('0df2')) return 'PS5 DualSense';
+  if (s.includes('dualshock') || s.includes('05c4') || s.includes('09cc')) return 'PS4 DualShock';
+  if (s.includes('playstation') || s.includes('sony') || s.includes('054c') || s.includes('wireless controller')) {
     return 'PlayStation';
   }
   if (s.includes('xbox') || s.includes('xinput') || s.includes('045e') || s.includes('microsoft')) {
@@ -2383,22 +2849,160 @@ function detectGamepadBrand(id = '') {
   return 'Controller';
 }
 
+function isNonStandardSonyPad(gp) {
+  if (!gp || gp.mapping === 'standard') return false;
+  const s = String(gp.id || '').toLowerCase();
+  return (
+    s.includes('054c') || s.includes('0ce6') || s.includes('0df2') ||
+    s.includes('dualsense') || s.includes('dualshock') || s.includes('playstation') ||
+    s.includes('sony') || s.includes('wireless controller')
+  );
+}
+
+// Normalize Xbox (Standard XInput) AND PS5 DualSense / PS4 DualShock (Standard OR Raw Bluetooth HID) into one clean layout!
+function readGamepadNormalized(gp) {
+  const axes = gp.axes || [];
+  const btns = gp.buttons || [];
+  const dead = 0.16;
+  const applyDead = (v) => {
+    const n = Number(v) || 0;
+    if (!Number.isFinite(n) || Math.abs(n) < dead) return 0;
+    return Math.max(-1, Math.min(1, (n - Math.sign(n) * dead) / (1 - dead)));
+  };
+  const btnDown = (idx, thresh = 0.35) => {
+    const b = btns[idx];
+    return !!(b && (b.pressed || (typeof b.value === 'number' && b.value > thresh)));
+  };
+
+  const nonStdSony = isNonStandardSonyPad(gp);
+  // Some generic non-standard Bluetooth controllers also place triggers on axes 3/4 (resting near -1) and Right Stick Y on axis 5
+  const useAxis5ForRy = nonStdSony || (gp.mapping !== 'standard' && axes.length > 5 && Math.abs(axes[3] || 0) > 0.85 && Math.abs(axes[5] || 0) < 0.85);
+
+  const lx = applyDead(axes[0] || 0);
+  const ly = applyDead(axes[1] || 0);
+  const rx = applyDead(axes[2] || 0);
+  const ry = applyDead(useAxis5ForRy ? (axes[5] || 0) : (axes[3] || 0));
+
+  let dUp = btnDown(12, 0.4);
+  let dDown = btnDown(13, 0.4);
+  let dLeft = btnDown(14, 0.4);
+  let dRight = btnDown(15, 0.4);
+
+  // Decode Hat-Switch D-Pad on axes[9] for Windows Bluetooth PS5 DualSense / DirectInput pads
+  if (gp.mapping !== 'standard' && axes.length > 9) {
+    const hat = axes[9];
+    if (typeof hat === 'number' && Math.abs(hat) > 0.001 && hat <= 1.15) {
+      if (hat <= -0.60 || hat >= 0.90) dUp = true;
+      if (hat >= -0.80 && hat <= -0.05) dRight = true;
+      if (hat >= -0.25 && hat <= 0.55) dDown = true;
+      if (hat >= 0.35 && hat <= 1.10) dLeft = true;
+    }
+  }
+
+  let jump, dash, attack, talkOrSwap, swap, share, start, slam, shield, nova;
+  if (nonStdSony) {
+    // Raw PS5 DualSense / PS4 DualShock HID button order: 0=Square, 1=Cross, 2=Circle, 3=Triangle, 4=L1, 5=R1, 6=L2, 7=R2, 8=Create, 9=Options, 10=L3, 11=R3
+    jump = btnDown(1);
+    dash = btnDown(2) || (btnDown(5) && !btnDown(4));
+    attack = btnDown(0) || btnDown(7, 0.18) || (axes.length > 4 && axes[4] > 0.25);
+    talkOrSwap = btnDown(3);
+    swap = btnDown(4) && !btnDown(5);
+    share = btnDown(8);
+    start = btnDown(9);
+    slam = btnDown(6, 0.22) || (axes.length > 3 && axes[3] > 0.25);
+    shield = btnDown(4) && btnDown(5);
+    nova = btnDown(10) && btnDown(11);
+  } else {
+    // Standard W3C Gamepad Layout (Xbox Series/One/360 + Standard PS5/PS4): 0=A/Cross, 1=B/Circle, 2=X/Square, 3=Y/Triangle, 4=LB/L1, 5=RB/R1, 6=LT/L2, 7=RT/R2, 8=View/Share, 9=Menu/Options, 10=L3, 11=R3
+    jump = btnDown(0);
+    dash = btnDown(1) || (btnDown(5) && !btnDown(4));
+    attack = btnDown(2) || btnDown(7, 0.18);
+    talkOrSwap = btnDown(3);
+    swap = btnDown(4) && !btnDown(5);
+    share = btnDown(8);
+    start = btnDown(9);
+    slam = btnDown(6, 0.22);
+    shield = btnDown(4) && btnDown(5);
+    nova = btnDown(10) && btnDown(11);
+  }
+
+  const anyAction = jump || dash || attack || talkOrSwap || swap || share || start || slam || shield || nova || dUp || dDown || dLeft || dRight;
+  const anyAxis = Math.abs(lx) > 0.12 || Math.abs(ly) > 0.12 || Math.abs(rx) > 0.12 || Math.abs(ry) > 0.12;
+  return {
+    lx, ly, rx, ry,
+    actions: { jump, dash, attack, talkOrSwap, swap, share, start, slam, shield, nova, dUp, dDown, dLeft, dRight },
+    hasInput: anyAction || anyAxis,
+    modeLabel: nonStdSony ? 'DualSense HID' : (gp.mapping === 'standard' ? 'Standard' : 'HID'),
+  };
+}
+
+function selectActiveGamepad(pads) {
+  let activeCandidate = null;
+  let fallback = null;
+  let fallbackScore = -1;
+
+  for (let i = 0; i < pads.length; i++) {
+    const gp = pads[i];
+    if (!gp || !gp.connected) continue;
+    const norm = readGamepadNormalized(gp);
+    // Any live press or stick movement immediately locks onto that controller (prevents ghost slot-0 devices stealing input!)
+    if (norm.hasInput) {
+      gamepadState.activeIndex = gp.index;
+      return { gp, norm };
+    }
+    if (gp.index === gamepadState.activeIndex) {
+      activeCandidate = { gp, norm };
+    }
+    const brand = detectGamepadBrand(gp.id);
+    let score = 0;
+    if (gp.mapping === 'standard') score += 4;
+    if (brand !== 'Controller') score += 3;
+    if ((gp.buttons?.length || 0) >= 10) score += 2;
+    if ((gp.axes?.length || 0) >= 4) score += 1;
+    if (score > fallbackScore) {
+      fallbackScore = score;
+      fallback = { gp, norm };
+    }
+  }
+  if (activeCandidate) return activeCandidate;
+  if (fallback) {
+    gamepadState.activeIndex = fallback.gp.index;
+    return fallback;
+  }
+  return null;
+}
+
+window.__skyboundGamepadDebug = () => ({
+  connected: gamepadState.connected,
+  brand: gamepadState.brand,
+  id: gamepadState.id,
+  mapping: gamepadState.mapping,
+  activeIndex: gamepadState.activeIndex,
+});
+
 window.addEventListener('gamepadconnected', (e) => {
   const gp = e.gamepad;
   gamepadState.connected = true;
+  gamepadState.activeIndex = typeof gp?.index === 'number' ? gp.index : 0;
   gamepadState.id = gp?.id || 'Gamepad';
   gamepadState.brand = detectGamepadBrand(gamepadState.id);
-  gamepadState.prevButtons = [];
+  gamepadState.mapping = isNonStandardSonyPad(gp) ? 'DualSense HID' : (gp?.mapping === 'standard' ? 'Standard' : 'HID');
+  gamepadState.prevActionsByIndex[gamepadState.activeIndex] = {};
   if (openMenu === 'option') updateControlsSummary();
   showToast(`${gamepadState.brand.toUpperCase()} CONTROLLER CONNECTED!`, '#34d399');
-  addChatMsg('sys', 'CONTROLLER', `${gamepadState.brand} Controller connected! Left Stick: Move · Right Stick: Cam · A/✕: Jump · X/□/RT: Attack · B/○: Dash`, '#34d399');
+  addChatMsg('sys', 'CONTROLLER', `${gamepadState.brand} (${gamepadState.mapping}) connected! Left Stick: Move · Right Stick: Cam · A/✕: Jump · X/□/RT/R2: Attack · B/○: Dash`, '#34d399');
 });
-window.addEventListener('gamepaddisconnected', () => {
-  const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
+window.addEventListener('gamepaddisconnected', (e) => {
+  if (e?.gamepad && typeof e.gamepad.index === 'number') {
+    delete gamepadState.prevActionsByIndex[e.gamepad.index];
+    if (gamepadState.activeIndex === e.gamepad.index) gamepadState.activeIndex = -1;
+  }
+  const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter((p) => p && p.connected) : [];
   if (pads.length === 0) {
     gamepadState.connected = false;
     gamepadState.id = '';
-    gamepadState.prevButtons = [];
+    gamepadState.mapping = '';
+    gamepadState.activeIndex = -1;
     if (openMenu === 'option') updateControlsSummary();
     showToast('CONTROLLER DISCONNECTED', '#facc15');
   }
@@ -2421,21 +3025,22 @@ function saveBinds() { try { localStorage.setItem(KEYS_STORAGE, JSON.stringify(k
 function updateControlsSummary() {
   const f = formatKeyCode;
   const gpStatus = gamepadState.connected
-    ? `<span class="green">CONNECTED (${escHtml(gamepadState.brand)})</span>`
-    : `<span style="opacity:0.8;">Plug in Xbox / PS Controller &amp; press any button</span>`;
+    ? `<span class="green">CONNECTED (${escHtml(gamepadState.brand)}${gamepadState.mapping ? ` · ${escHtml(gamepadState.mapping)}` : ''})</span>`
+    : `<span style="opacity:0.8;">Plug in Xbox / PS5 Controller &amp; press any button</span>`;
 
   if (inputMode === 'gamepad') {
     controlsSummary.innerHTML =
       `<b>Controller Status:</b> ${gpStatus}<br />` +
       `<b>Move:</b> Left Stick · <b>Camera:</b> Right Stick · <b>Zoom:</b> D-Pad Up/Down<br />` +
-      `<b>Jump:</b> A / ✕ · <b>Auto-Aim Attack:</b> X / □ / RT / R2 · <b>Dash:</b> B / ○ / RB / R1<br />` +
-      `<b>Talk NPC / Swap:</b> Y / △ / LB / L1 · <b>Menu:</b> Start / Options · <b>Stash:</b> View / Share<br />` +
+      `<b>Jump / Glide:</b> A / ✕ (Hold midair) · <b>Auto-Aim Attack:</b> X / □ / RT / R2 · <b>Dash:</b> B / ○ / RB / R1<br />` +
+      `<b>Abilities:</b> LT/L2 Slam · L1+R1 Aegis Shield · L3+R3 Sky Nova · <b>Talk / Swap:</b> Y / △ / LB / L1<br />` +
+      `<b>Menu:</b> Start / Options · <b>Stash:</b> View / Share · ` +
       `<b>Stats:</b> STR ${saveState.stats.str} · STA ${saveState.stats.sta} · SPD ${saveState.stats.spd} · Armor Lv${saveState.armorLevel}` +
       (saveState.guild ? ` · Guild [${saveState.guild.tag}]` : '');
   } else {
     controlsSummary.innerHTML =
       `<b>Keyboard &amp; Mouse:</b> ${f(keybinds.forward)}/${f(keybinds.left)}/${f(keybinds.back)}/${f(keybinds.right)} Move &amp; Strafe · <b>Mouse:</b> 360° Aim (Click game to lock, <b>Esc/Tab</b> to free cursor)<br />` +
-      `<b>Left-Click / ${f(keybinds.attack)}:</b> Attack · <b>Right-Click / ${f(keybinds.dash)}:</b> Dash · <b>${f(keybinds.jump)}:</b> Jump · <b>${f(keybinds.talk)}:</b> Talk · <b>J:</b> Quest Log · <b>Scroll:</b> Zoom<br />` +
+      `<b>Left-Click / ${f(keybinds.attack)}:</b> Attack · <b>Right-Click / ${f(keybinds.dash)}:</b> Dash · <b>${f(keybinds.jump)}:</b> Jump/Glide · <b>1/2/3:</b> Abilities · <b>${f(keybinds.talk)}:</b> Talk · <b>J:</b> Quests<br />` +
       `<b>Xbox / PlayStation Controller:</b> ${gpStatus}<br />` +
       `<b>Stats:</b> STR ${saveState.stats.str} · STA ${saveState.stats.sta} · SPD ${saveState.stats.spd} · Armor Lv${saveState.armorLevel}` +
       (saveState.guild ? ` · Guild [${saveState.guild.tag}]` : '');
@@ -2502,11 +3107,12 @@ document.getElementById('randomNameBtn')?.addEventListener('click', () => {
 });
 document.getElementById('randomStyleBtn')?.addEventListener('click', () => {
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)].id;
+  const isF = saveState.avatar.gender === 'female';
   saveState.avatar.skin = pick(AVATAR_OPTIONS.skin);
   saveState.avatar.emotion = pick(AVATAR_OPTIONS.emotion);
-  saveState.avatar.hairStyle = pick(AVATAR_OPTIONS.hairStyle);
+  saveState.avatar.hairStyle = pick(isF ? AVATAR_OPTIONS.femaleHairStyle : AVATAR_OPTIONS.hairStyle);
   saveState.avatar.hairColor = pick(AVATAR_OPTIONS.hairColor);
-  saveState.avatar.beard = pick(AVATAR_OPTIONS.beard);
+  saveState.avatar.beard = isF ? 'none' : pick(AVATAR_OPTIONS.beard);
   saveState.avatar.outfit = pick(AVATAR_OPTIONS.outfit);
   player.refreshAvatarVisuals();
   writeGameSave(saveState);
@@ -2957,6 +3563,16 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (!started && !creatingCharacter && (code === 'Enter' || code === 'Space')) { e.preventDefault(); startBtn.click(); return; }
+  if (code === 'Enter' && started && !paused && !openMenu && !creatingCharacter && chatInput) {
+    e.preventDefault();
+    if (chatWrap?.classList.contains('minimized')) {
+      chatWrap.classList.remove('minimized');
+      if (chatMinBtn) chatMinBtn.textContent = '−';
+    }
+    if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+    chatInput.focus();
+    return;
+  }
   if (!started || paused || openMenu) return;
   audio.unlock();
   if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) e.preventDefault();
@@ -2970,6 +3586,9 @@ window.addEventListener('keydown', (e) => {
     if (matchesBind(code, 'swap')) cycleBagWeapon();
     if (matchesBind(code, 'talk') && nearbyNpc) { activeNpc = nearbyNpc; showMenu('npc'); }
     if (matchesBind(code, 'respawn')) player.respawn(false);
+    if (code === 'Digit1') player.triggerAbility('shockwaveSlam', combat);
+    if (code === 'Digit2') player.triggerAbility('aegisShield', combat);
+    if (code === 'Digit3') player.triggerAbility('skyNova', combat);
     if (code === 'Equal' || code === 'NumpadAdd') targetCamDist = Math.max(3.4, targetCamDist - 1.5);
     if (code === 'Minus' || code === 'NumpadSubtract') targetCamDist = Math.min(18.0, targetCamDist + 1.5);
   }
@@ -3144,18 +3763,23 @@ dragPad.addEventListener('pointermove', (e) => {
 dragPad.addEventListener('pointerup', releaseStick);
 dragPad.addEventListener('pointercancel', releaseStick);
 
-function bindTouchAction(el, fn) {
+let touchJumpHeld = false;
+function bindTouchAction(el, fn, onHoldChange = null) {
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
     buttonPointerIds.add(e.pointerId);
     audio.unlock();
+    if (onHoldChange) onHoldChange(true);
     fn();
   });
-  const clear = (e) => buttonPointerIds.delete(e.pointerId);
+  const clear = (e) => {
+    buttonPointerIds.delete(e.pointerId);
+    if (onHoldChange) onHoldChange(false);
+  };
   el.addEventListener('pointerup', clear);
   el.addEventListener('pointercancel', clear);
 }
-bindTouchAction(document.getElementById('btnJump'), () => player.requestJump());
+bindTouchAction(document.getElementById('btnJump'), () => player.requestJump(), (held) => { touchJumpHeld = held; });
 bindTouchAction(document.getElementById('btnAttack'), () => player.requestAttack(combat));
 bindTouchAction(document.getElementById('btnDash'), () => {
   const mv = getLiveMoveAxes();
@@ -3183,69 +3807,93 @@ let lastTime = performance.now();
 const camTarget = new THREE.Vector3();
 const camDesired = new THREE.Vector3();
 
-// Poll Xbox / PlayStation Gamepad each frame (standard HTML5 Gamepad API)
+// Poll Xbox & PS5 DualSense / PS4 DualShock Gamepad each frame (Multi-Slot + Standard & Raw HID support!)
 function pollGamepad(dt) {
-  const out = { moveX: 0, moveY: 0, camX: 0, camY: 0 };
+  const out = { moveX: 0, moveY: 0, camX: 0, camY: 0, jumpHeld: false };
   if (!navigator.getGamepads) return out;
   const pads = navigator.getGamepads();
-  let gp = null;
-  for (let i = 0; i < pads.length; i++) {
-    if (pads[i] && pads[i].connected) { gp = pads[i]; break; }
-  }
-  if (!gp) return out;
+  if (!pads || pads.length === 0) return out;
 
-  if (!gamepadState.connected) {
+  const picked = selectActiveGamepad(pads);
+  if (!picked) {
+    if (gamepadState.connected) {
+      gamepadState.connected = false;
+      gamepadState.id = '';
+      gamepadState.mapping = '';
+      gamepadState.activeIndex = -1;
+      if (openMenu === 'option') updateControlsSummary();
+    }
+    return out;
+  }
+
+  const { gp, norm } = picked;
+  const newBrand = detectGamepadBrand(gp.id);
+  const changedPad = !gamepadState.connected || gamepadState.id !== (gp.id || 'Gamepad') || gamepadState.mapping !== norm.modeLabel;
+  if (changedPad) {
     gamepadState.connected = true;
     gamepadState.id = gp.id || 'Gamepad';
-    gamepadState.brand = detectGamepadBrand(gamepadState.id);
+    gamepadState.brand = newBrand;
+    gamepadState.mapping = norm.modeLabel;
+    if (openMenu === 'option') updateControlsSummary();
   }
 
-  const dead = 0.18;
-  const ax = (idx) => {
-    const v = gp.axes?.[idx] || 0;
-    return Math.abs(v) < dead ? 0 : (v - Math.sign(v) * dead) / (1 - dead);
-  };
-  const pressed = (idx) => {
-    const b = gp.buttons?.[idx];
-    return !!(b && (b.pressed || b.value > 0.45));
-  };
-  const justPressed = (idx) => pressed(idx) && !gamepadState.prevButtons[idx];
+  const prev = gamepadState.prevActionsByIndex[gp.index] || {};
+  const act = norm.actions;
+  const just = (name) => !!act[name] && !prev[name];
+  if (norm.hasInput) gamepadState.lastInputAt = performance.now();
 
-  // Global Menu / Start buttons (work even on Title Screen or Menus!)
-  if (!started && !creatingCharacter && (justPressed(0) || justPressed(9))) {
+  const tutorialOpen = tutorialOverlay && !tutorialOverlay.classList.contains('hidden');
+  const clearOpen = levelClearOverlay && !levelClearOverlay.classList.contains('hidden');
+  const gameOverOpen = gameOverOverlay && !gameOverOverlay.classList.contains('hidden');
+
+  // Global Title / Modal / End-of-Stage Controls (A/Cross confirms, B/Circle cancels/closes!)
+  if (!started && !creatingCharacter && (just('jump') || just('start'))) {
+    audio.unlock();
     startBtn.click();
+  } else if (tutorialOpen && (just('jump') || just('dash') || just('start'))) {
+    closeTutorialBtn.click();
+  } else if (clearOpen) {
+    if (just('jump') || just('start')) nextLevelBtn.click();
+    else if (just('dash')) clearHavenBtn.click();
+  } else if (gameOverOpen) {
+    if (just('jump') || just('start')) retryBtn.click();
+    else if (just('dash')) goHavenBtn.click();
   } else if (started && !paused && !creatingCharacter) {
-    if (justPressed(9)) { // Start / Options
+    if (just('start')) { // Start / Options
       if (openMenu) closeAllMenus();
       else showMenu('option');
-    } else if (justPressed(8)) { // Back / View / Share -> Bag
+    } else if (just('share')) { // Back / View / Share / Create -> Stash
       if (openMenu === 'bag') closeAllMenus();
       else showMenu('bag');
-    } else if (openMenu && justPressed(1)) { // B / Circle closes modal
+    } else if (openMenu && just('dash')) { // B / Circle closes any open modal
       closeAllMenus();
     } else if (!openMenu) {
-      out.moveX = ax(0);
-      out.moveY = -ax(1);
-      out.camX = ax(2);
-      out.camY = ax(3);
+      out.moveX = norm.lx;
+      out.moveY = -norm.ly;
+      out.camX = norm.rx;
+      out.camY = norm.ry;
 
       // D-Pad Zoom & Weapon Swap
-      if (pressed(12)) targetCamDist = Math.max(3.4, targetCamDist - 7.5 * dt); // D-Up: Zoom In
-      if (pressed(13)) targetCamDist = Math.min(18.0, targetCamDist + 7.5 * dt); // D-Down: Zoom Out
-      if (justPressed(14) || justPressed(15) || justPressed(4)) cycleBagWeapon(); // D-Left/Right or LB/L1
+      if (act.dUp) targetCamDist = Math.max(3.4, targetCamDist - 7.5 * dt);
+      if (act.dDown) targetCamDist = Math.min(18.0, targetCamDist + 7.5 * dt);
+      if (just('dLeft') || just('dRight') || just('swap')) cycleBagWeapon();
 
-      // Face Buttons & Triggers (Xbox / PlayStation standard layout)
-      if (justPressed(0)) { audio.unlock(); player.requestJump(); } // A / Cross
-      if (justPressed(2) || justPressed(7)) { audio.unlock(); player.requestAttack(combat); } // X / Square / RT / R2
-      if (justPressed(1) || justPressed(5)) { audio.unlock(); player.requestDash(out.moveX, out.moveY); } // B / Circle / RB / R1 (Directional Dash!)
-      if (justPressed(3)) { // Y / Triangle -> Talk NPC or Swap Bag Weapon
+      // Face Buttons, Triggers & Unlockable Abilities (Supports tap + smooth hold-to-attack + midair Sky Glide!)
+      out.jumpHeld = !!act.jump;
+      if (just('jump')) { audio.unlock(); player.requestJump(); }
+      if (just('attack') || (act.attack && player.attackCooldown <= 0)) { audio.unlock(); player.requestAttack(combat); }
+      if (just('dash')) { audio.unlock(); player.requestDash(out.moveX, out.moveY); }
+      if (just('slam')) { audio.unlock(); player.triggerAbility('shockwaveSlam', combat); }
+      if (just('shield')) { audio.unlock(); player.triggerAbility('aegisShield', combat); }
+      if (just('nova')) { audio.unlock(); player.triggerAbility('skyNova', combat); }
+      if (just('talkOrSwap')) {
         if (nearbyNpc) { activeNpc = nearbyNpc; showMenu('npc'); }
         else cycleBagWeapon();
       }
     }
   }
 
-  gamepadState.prevButtons = gp.buttons ? gp.buttons.map((b) => !!(b && (b.pressed || b.value > 0.45))) : [];
+  gamepadState.prevActionsByIndex[gp.index] = { ...act };
   return out;
 }
 
@@ -3274,17 +3922,21 @@ function animate(now) {
     const rotLeft = isDown('camLeft');
     const rotRight = isDown('camRight');
     if (Math.abs(gpInput.camX) > 0.01 || Math.abs(gpInput.camY) > 0.01) {
-      player.camYaw -= gpInput.camX * 2.5 * dt;
-      player.camPitch = Math.max(-0.08, Math.min(1.05, player.camPitch + gpInput.camY * 1.5 * dt));
+      player.camYaw -= gpInput.camX * 2.6 * dt;
+      player.camPitch = Math.max(-0.08, Math.min(1.05, player.camPitch + gpInput.camY * 1.55 * dt));
+      if (camMode === 'mouselook') player.facingYaw = player.camYaw + Math.PI;
       autoCamPauseTimer = 1.4;
     }
     if (rotLeft || rotRight) autoCamPauseTimer = 1.4;
     if (autoCamPauseTimer > 0) autoCamPauseTimer = Math.max(0, autoCamPauseTimer - dt);
 
-    const csLocked = document.pointerLockElement === canvas && camMode === 'mouselook';
-    player.update(dt, elapsed, { moveX, moveY, rotLeft, rotRight, csLook: csLocked });
+    const gamepadActive = gamepadState.connected && (performance.now() - gamepadState.lastInputAt) < 4000;
+    const csLocked = (document.pointerLockElement === canvas && camMode === 'mouselook') || (gamepadActive && inputMode === 'gamepad');
+    const jumpHeld = isDown('jump') || keys.has('Space') || touchJumpHeld || !!gpInput.jumpHeld;
+    player.update(dt, elapsed, { moveX, moveY, rotLeft, rotRight, csLook: csLocked, jumpHeld });
     updateCsAimUi();
     updateQuestTracker(false);
+    updateAbilityBarUi(false);
 
     // Check nearby Talkable NPC in Safe Haven
     nearbyNpc = player.getNearbyNpc();
@@ -3311,6 +3963,7 @@ function animate(now) {
     if (paused && document.pointerLockElement === canvas) document.exitPointerLock?.();
     updateCsAimUi();
     updateQuestTracker(false);
+    updateAbilityBarUi(false);
     if (!started) player.camYaw = Math.sin(elapsed * 0.28) * 0.55;
   }
 

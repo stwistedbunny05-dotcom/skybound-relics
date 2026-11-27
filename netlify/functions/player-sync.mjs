@@ -40,12 +40,53 @@ export default async (req, context) => {
   }
 
   const action = String(body?.action || "");
+  const store = getGameStore(context);
+
+  // Cross-Device Account Linking by Game Account ID (SKY-XXXXXX) OR Hero Name!
+  if (action === "link_account") {
+    try {
+      const rawQuery = String(body?.query || "").trim();
+      if (rawQuery.length < 3) {
+        return jsonRes({ ok: false, error: "Enter your Hero Name or Game Account ID (e.g. SKY-XXXXXX)." }, 400);
+      }
+      const upperQ = rawQuery.toUpperCase();
+      let found = null;
+      if (PLAYER_ID_RE.test(upperQ)) {
+        found = await store.get(`players/${upperQ}`, { type: "json", consistency: "strong" });
+      } else {
+        const { blobs } = await store.list({ prefix: "players/" });
+        const lowerQ = rawQuery.toLowerCase();
+        for (const b of (blobs || []).slice(0, 500)) {
+          const p = await store.get(b.key, { type: "json", consistency: "strong" });
+          if (p && String(p.name || "").trim().toLowerCase() === lowerQ) {
+            found = p;
+            break;
+          }
+        }
+      }
+      if (!found) {
+        return jsonRes({ ok: false, error: `No synced account found matching "${rawQuery}". Make sure your other device played online at least once!` }, 404);
+      }
+      if (found.banned) {
+        return jsonRes({ ok: false, error: `Account ${found.playerId} is suspended: ${found.banReason || "Suspended by Owner"}` }, 403);
+      }
+      return jsonRes({
+        ok: true,
+        playerId: found.playerId,
+        name: found.name,
+        isOwner: Boolean(found.isOwner),
+        cloudSave: found.cloudSave || null,
+      });
+    } catch (err) {
+      console.error("link_account error:", err);
+      return jsonRes({ ok: false, error: "Server lookup error" }, 500);
+    }
+  }
+
   const playerId = String(body?.playerId || "").trim().toUpperCase();
   if (!PLAYER_ID_RE.test(playerId)) {
     return jsonRes({ ok: false, error: "Invalid Player ID" }, 400);
   }
-
-  const store = getGameStore(context);
 
   try {
     if (action === "sync") {
@@ -64,6 +105,7 @@ export default async (req, context) => {
         isOwner: Boolean(existing?.isOwner),
         banned: Boolean(existing?.banned),
         banReason: existing?.banReason ? String(existing.banReason).slice(0, 100) : "",
+        cloudSave: (body?.cloudSave && typeof body.cloudSave === "object") ? body.cloudSave : (existing?.cloudSave || null),
         firstSeen: existing?.firstSeen || Date.now(),
         lastSeen: Date.now(),
       };
@@ -102,6 +144,12 @@ export default async (req, context) => {
             weaponLevel: g.weaponLevel || null,
             arrowId: g.arrowId || null,
             armorLevel: g.armorLevel || null,
+            heartsLevel: g.heartsLevel || null,
+            statBoost: g.statBoost || null,
+            abilityLevel: g.abilityLevel || null,
+            diffTier: g.diffTier || null,
+            rankBoost: g.rankBoost || null,
+            worldAccess: g.worldAccess || null,
             note: String(g.note || "Owner Gift").slice(0, 80),
             sentAt: g.sentAt || Date.now(),
           });
