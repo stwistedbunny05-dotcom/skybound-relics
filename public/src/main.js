@@ -2024,24 +2024,64 @@ async function syncPlayerMailbox(manual = false) {
       changed = true;
     }
     const total = Number(data.totalGiftCredits) || 0;
+    const gifts = Array.isArray(data.claimedGifts) ? data.claimedGifts : [];
+    const deliveredLabels = [];
+
     if (total > 0) {
       addCredits(saveState, total);
       changed = true;
-      audio.playChestOpen();
-      const firstNote = data.claimedGifts?.[0]?.note || 'Owner Gift';
-      const msg = `OWNER GIFT RECEIVED: +${total.toLocaleString()} CR (${firstNote})!`;
-      showToast(msg, '#facc15');
-      for (const g of data.claimedGifts || []) {
+    }
+    for (const g of gifts) {
+      const kind = g.kind || 'coins';
+      if ((kind === 'weapon' || kind === 'lucky_drop') && g.weaponId && WEAPON_CATALOG[g.weaponId]) {
+        const wDef = WEAPON_CATALOG[g.weaponId];
+        const wLvl = Math.max(1, Math.min(6, Number(g.weaponLevel) || 4));
+        const resBag = addItemToBag(saveState, g.weaponId, wLvl);
+        changed = true;
+        if (resBag.ok) {
+          const tag = kind === 'lucky_drop' ? 'LUCKY DROP' : 'RARE GIFT';
+          const lbl = `${wDef.name} Lv${wLvl}`;
+          deliveredLabels.push(lbl);
+          addChatMsg('sys', tag, `Received ${lbl}${g.amount > 0 ? ` + ${g.amount.toLocaleString()} CR` : ''} in your Bag (${g.note})!`, '#e879f9');
+        } else {
+          addCredits(saveState, 350);
+          deliveredLabels.push(`${wDef.name} (+350 CR bag-full bonus)`);
+          addChatMsg('sys', 'MAILBOX', `Bag full for ${wDef.name} Lv${wLvl} — received +350 CR bonus instead!`, '#facc15');
+        }
+      } else if (kind === 'arrow' && g.arrowId && saveState.arrowsOwned) {
+        saveState.arrowsOwned[g.arrowId] = true;
+        saveState.equippedArrow = g.arrowId;
+        changed = true;
+        deliveredLabels.push(`${g.arrowId.toUpperCase()} ARROWS`);
+        addChatMsg('sys', 'RARE GIFT', `Unlocked ${g.arrowId.toUpperCase()} ARROWS from Owner (${g.note})!`, '#38bdf8');
+      } else if (kind === 'armor' && g.armorLevel) {
+        const nextLvl = Math.max(saveState.armorLevel || 1, Math.min(6, Number(g.armorLevel) || 6));
+        saveState.armorLevel = nextLvl;
+        player.refreshGearVisuals();
+        player.healFull();
+        changed = true;
+        deliveredLabels.push(`Armor Lv${nextLvl}`);
+        addChatMsg('sys', 'RARE GIFT', `3D Armor upgraded to Lv${nextLvl} by Owner (${g.note})!`, '#fb7185');
+      } else if (g.amount > 0) {
         addChatMsg('sys', 'MAILBOX', `Received +${Number(g.amount).toLocaleString()} CR from Owner (${g.note})!`, '#facc15');
       }
+    }
+
+    if (total > 0 || deliveredLabels.length > 0) {
+      audio.playChestOpen();
+      const parts = [];
+      if (deliveredLabels.length > 0) parts.push(deliveredLabels.join(', '));
+      if (total > 0) parts.push(`+${total.toLocaleString()} CR`);
+      const toastTxt = `OWNER GIFT RECEIVED: ${parts.join(' + ')}!`;
+      showToast(toastTxt, deliveredLabels.length > 0 ? '#e879f9' : '#facc15');
       refreshHud();
     }
     if (changed) writeGameSave(saveState);
     return {
       ok: true,
       total,
-      msg: total > 0
-        ? `Claimed +${total.toLocaleString()} Credits from your Owner Mailbox!`
+      msg: (total > 0 || deliveredLabels.length > 0)
+        ? `Claimed ${[...deliveredLabels, total > 0 ? `+${total.toLocaleString()} CR` : ''].filter(Boolean).join(' + ')} from your Owner Mailbox!`
         : 'Synced! No new gifts in your mailbox right now.',
     };
   } catch {
@@ -2078,16 +2118,31 @@ async function redeemGiftCode(code) {
       };
     }
     const amt = Number(data.amount) || 0;
+    const rewardParts = [];
     if (amt > 0) {
       addCredits(saveState, amt);
+      rewardParts.push(`+${amt.toLocaleString()} CR`);
+    }
+    if (data.weaponId && WEAPON_CATALOG[data.weaponId]) {
+      const wDef = WEAPON_CATALOG[data.weaponId];
+      const wLvl = Math.max(1, Math.min(6, Number(data.weaponLevel) || 4));
+      const resBag = addItemToBag(saveState, data.weaponId, wLvl);
+      if (resBag.ok) {
+        rewardParts.push(`${data.isLuckyDrop ? 'LUCKY DROP: ' : ''}${wDef.name} Lv${wLvl} → Bag!`);
+      } else {
+        addCredits(saveState, 350);
+        rewardParts.push(`Bag full (+350 CR bonus)`);
+      }
+    }
+    if (rewardParts.length > 0) {
       writeGameSave(saveState);
       refreshHud();
       audio.playChestOpen();
-      const msg = `CODE REDEEMED: +${amt.toLocaleString()} CR (${data.note || data.code})!`;
-      showToast(msg, '#34d399');
-      addChatMsg('sys', 'REDEEM', msg, '#34d399');
+      const msg = `CODE REDEEMED: ${rewardParts.join(' + ')}!`;
+      showToast(msg, data.weaponId ? '#e879f9' : '#34d399');
+      addChatMsg('sys', 'REDEEM', msg, data.weaponId ? '#e879f9' : '#34d399');
     }
-    return { ok: true, msg: `Success! +${amt.toLocaleString()} Credits added to your account!` };
+    return { ok: true, msg: `Success! Claimed ${rewardParts.join(' + ')}!` };
   } catch {
     return { ok: false, msg: 'Offline mode: redeem codes work on your live Netlify site.' };
   }

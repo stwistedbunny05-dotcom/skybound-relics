@@ -1,7 +1,18 @@
+import crypto from "node:crypto";
 import { getStore } from "@netlify/blobs";
 
 const PLAYER_ID_RE = /^SKY-[A-Z0-9]{4,8}$/;
 const CODE_RE = /^SKY-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+const RARE_BOSS_WEAPONS = ["kunai", "venom_dagger", "storm_bow", "dragon_lance", "sunblade", "titan_axe"];
+
+function rollLuckyDrop() {
+  const r = crypto.randomBytes(4);
+  const weaponId = RARE_BOSS_WEAPONS[r[0] % RARE_BOSS_WEAPONS.length];
+  const roll = r[1] % 100;
+  const weaponLevel = roll < 7 ? 6 : roll < 25 ? 5 : roll < 55 ? 4 : 3;
+  const bonusCoins = [250, 400, 600, 850, 1200, 1500][r[2] % 6];
+  return { weaponId, weaponLevel, bonusCoins };
+}
 
 function jsonRes(body, status = 200) {
   return Response.json(body, {
@@ -69,7 +80,7 @@ export default async (req, context) => {
         });
       }
 
-      // Claim any pending Owner Coin Gifts stored as immutable blobs under gifts/<playerId>/
+      // Claim any pending Owner Coin, Rare Weapon, Lucky Drop, Arrow & Armor Gifts!
       const giftPrefix = `gifts/${playerId}/`;
       const { blobs } = await store.list({ prefix: giftPrefix });
       const claimedGifts = [];
@@ -77,18 +88,23 @@ export default async (req, context) => {
 
       for (const b of blobs || []) {
         const g = await store.get(b.key, { type: "json", consistency: "strong" });
-        if (g && Number(g.amount) > 0) {
-          await store.delete(b.key);
-          const amt = Math.floor(Number(g.amount));
-          totalGiftCredits += amt;
+        await store.delete(b.key);
+        if (!g) continue;
+        const kind = String(g.kind || "coins");
+        const amt = Math.max(0, Math.floor(Number(g.amount) || 0));
+        if (amt > 0) totalGiftCredits += amt;
+        if (amt > 0 || kind !== "coins") {
           claimedGifts.push({
             id: g.id || b.key,
+            kind,
             amount: amt,
+            weaponId: g.weaponId || null,
+            weaponLevel: g.weaponLevel || null,
+            arrowId: g.arrowId || null,
+            armorLevel: g.armorLevel || null,
             note: String(g.note || "Owner Gift").slice(0, 80),
             sentAt: g.sentAt || Date.now(),
           });
-        } else {
-          await store.delete(b.key);
         }
       }
 
@@ -119,12 +135,26 @@ export default async (req, context) => {
         return jsonRes({ ok: false, error: "This code has already been redeemed" }, 409);
       }
 
+      let rewardWeaponId = entry.data.bonusKind === "weapon" ? entry.data.weaponId : null;
+      let rewardWeaponLevel = entry.data.bonusKind === "weapon" ? (entry.data.weaponLevel || 4) : null;
+      let totalAmount = Math.max(0, Math.floor(Number(entry.data.amount) || 0));
+      let isLuckyDrop = entry.data.bonusKind === "lucky_drop";
+
+      if (isLuckyDrop) {
+        const rolled = rollLuckyDrop();
+        rewardWeaponId = rolled.weaponId;
+        rewardWeaponLevel = rolled.weaponLevel;
+        totalAmount += rolled.bonusCoins;
+      }
+
       const updated = {
         ...entry.data,
         used: true,
         usedBy: playerId,
         usedByName: String(body?.name || "Explorer").trim().slice(0, 18),
         usedAt: Date.now(),
+        rolledWeaponId: rewardWeaponId,
+        rolledWeaponLevel: rewardWeaponLevel,
       };
       const res = await store.setJSON(codeKey, updated, { onlyIfMatch: entry.etag });
       if (!res?.modified) {
@@ -134,7 +164,10 @@ export default async (req, context) => {
       return jsonRes({
         ok: true,
         code,
-        amount: Math.floor(Number(entry.data.amount) || 0),
+        amount: totalAmount,
+        isLuckyDrop,
+        weaponId: rewardWeaponId,
+        weaponLevel: rewardWeaponLevel,
         note: String(entry.data.note || "Gift Code").slice(0, 80),
       });
     }

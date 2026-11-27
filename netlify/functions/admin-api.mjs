@@ -4,6 +4,21 @@ import { getStore } from "@netlify/blobs";
 const PLAYER_ID_RE = /^SKY-[A-Z0-9]{4,8}$/;
 const CODE_RE = /^SKY-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const VALID_WEAPONS = new Set([
+  "knife", "kunai", "dagger", "venom_dagger", "bow", "storm_bow",
+  "spear", "dragon_lance", "sword", "sunblade", "axe", "titan_axe",
+]);
+const RARE_BOSS_WEAPONS = ["kunai", "venom_dagger", "storm_bow", "dragon_lance", "sunblade", "titan_axe"];
+const VALID_ARROWS = new Set(["iron", "fire", "lightning"]);
+
+function rollLuckyDrop() {
+  const r = crypto.randomBytes(4);
+  const weaponId = RARE_BOSS_WEAPONS[r[0] % RARE_BOSS_WEAPONS.length];
+  const roll = r[1] % 100;
+  const weaponLevel = roll < 7 ? 6 : roll < 25 ? 5 : roll < 55 ? 4 : 3;
+  const bonusCoins = [250, 400, 600, 850, 1200, 1500][r[2] % 6];
+  return { weaponId, weaponLevel, bonusCoins };
+}
 
 function jsonRes(body, status = 200) {
   return Response.json(body, {
@@ -112,22 +127,77 @@ export default async (req, context) => {
       }
 
       const giftId = `${Date.now()}-${randomCodePart(4)}`;
-      const gift = { id: giftId, playerId, amount, note, sentAt: Date.now() };
+      const gift = { id: giftId, kind: "coins", playerId, amount, note, sentAt: Date.now() };
+      await store.setJSON(`gifts/${playerId}/${giftId}`, gift, { onlyIfNew: true });
+      return jsonRes({ ok: true, gift });
+    }
+
+    if (action === "send_item") {
+      const playerId = String(body?.playerId || "").trim().toUpperCase();
+      const kind = String(body?.kind || "weapon");
+      const note = String(body?.note || "Owner Rare Gift").trim().slice(0, 80);
+
+      if (!PLAYER_ID_RE.test(playerId)) {
+        return jsonRes({ ok: false, error: "Invalid Player ID (expected SKY-XXXXXX)" }, 400);
+      }
+
+      const giftId = `${Date.now()}-${randomCodePart(4)}`;
+      let gift = { id: giftId, kind, playerId, amount: 0, note, sentAt: Date.now() };
+
+      if (kind === "weapon") {
+        const weaponId = String(body?.weaponId || "").trim();
+        const weaponLevel = Math.max(1, Math.min(6, Math.floor(Number(body?.weaponLevel) || 4)));
+        if (!VALID_WEAPONS.has(weaponId)) {
+          return jsonRes({ ok: false, error: "Invalid weapon selected" }, 400);
+        }
+        gift = { ...gift, weaponId, weaponLevel };
+      } else if (kind === "lucky_drop") {
+        const rolled = rollLuckyDrop();
+        gift = {
+          ...gift,
+          weaponId: rolled.weaponId,
+          weaponLevel: rolled.weaponLevel,
+          amount: rolled.bonusCoins,
+          note: note || "Lucky Drop Mystery Box",
+        };
+      } else if (kind === "arrow") {
+        const arrowId = String(body?.arrowId || "").trim();
+        if (!VALID_ARROWS.has(arrowId)) {
+          return jsonRes({ ok: false, error: "Invalid arrow type" }, 400);
+        }
+        gift = { ...gift, arrowId };
+      } else if (kind === "armor") {
+        const armorLevel = Math.max(2, Math.min(6, Math.floor(Number(body?.armorLevel) || 6)));
+        gift = { ...gift, armorLevel };
+      } else {
+        return jsonRes({ ok: false, error: "Invalid gift type" }, 400);
+      }
+
       await store.setJSON(`gifts/${playerId}/${giftId}`, gift, { onlyIfNew: true });
       return jsonRes({ ok: true, gift });
     }
 
     if (action === "create_code") {
-      const amount = Math.floor(Number(body?.amount) || 0);
+      const amount = Math.max(0, Math.floor(Number(body?.amount) || 0));
+      const bonusKind = String(body?.bonusKind || "none");
+      const weaponId = String(body?.weaponId || "").trim();
+      const weaponLevel = Math.max(1, Math.min(6, Math.floor(Number(body?.weaponLevel) || 4)));
       const note = String(body?.note || "Owner Gift Code").trim().slice(0, 80);
-      if (amount < 1 || amount > 1000000) {
-        return jsonRes({ ok: false, error: "Coin amount must be between 1 and 1,000,000" }, 400);
+
+      if (amount > 1000000 || (amount < 1 && bonusKind === "none")) {
+        return jsonRes({ ok: false, error: "Enter a coin amount (1–1,000,000) or select a Rare Item / Lucky Drop" }, 400);
+      }
+      if (bonusKind === "weapon" && !VALID_WEAPONS.has(weaponId)) {
+        return jsonRes({ ok: false, error: "Invalid bonus weapon selected" }, 400);
       }
 
       const code = `SKY-${randomCodePart(4)}-${randomCodePart(4)}`;
       const entry = {
         code,
         amount,
+        bonusKind,
+        weaponId: bonusKind === "weapon" ? weaponId : null,
+        weaponLevel: bonusKind === "weapon" ? weaponLevel : null,
         note,
         used: false,
         usedBy: null,

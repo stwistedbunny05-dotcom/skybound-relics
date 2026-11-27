@@ -34,7 +34,7 @@
     .stat { background: #020617; border: 2px solid #1e293b; padding: 12px; text-align: center; }
     .stat b { display: block; font-size: 22px; color: #facc15; margin-bottom: 2px; }
     .stat span { font-size: 10px; color: #94a3b8; letter-spacing: 0.6px; text-transform: uppercase; }
-    input {
+    input, select {
       background: #020617;
       border: 2px solid #475569;
       color: #f8fafc;
@@ -43,7 +43,7 @@
       font-size: 12px;
       outline: none;
     }
-    input:focus { border-color: #38bdf8; }
+    input:focus, select:focus { border-color: #38bdf8; }
     button {
       font: inherit;
       font-size: 12px;
@@ -160,12 +160,41 @@
             Generates a single-use code (<b>SKY-XXXX-XXXX</b>). Players enter it in <b>STORE → CREDITS</b>. Expires permanently after 1 claim!
           </p>
           <form id="codeForm" style="display:flex; flex-direction:column; gap:8px;">
-            <input id="codeAmount" type="number" min="1" max="1000000" value="500" placeholder="Coin amount" required />
+            <input id="codeAmount" type="number" min="0" max="1000000" value="500" placeholder="Coin amount (0 if item-only)" required />
             <div class="quick-row">
               <button type="button" class="sm" data-fill-code="250">250 CR</button>
               <button type="button" class="sm" data-fill-code="500">500 CR</button>
               <button type="button" class="sm" data-fill-code="1000">1,000 CR</button>
               <button type="button" class="sm" data-fill-code="2500">2,500 CR</button>
+            </div>
+            <select id="codeBonusKind">
+              <option value="none">Bonus Item: None (Coins Only)</option>
+              <option value="lucky_drop">🎲 Bonus: Lucky Drop Mystery Box (Rare Boss Weapon Lv3–6 + Bonus CR!)</option>
+              <option value="weapon">⚔️ Bonus: Specific Rare Weapon</option>
+            </select>
+            <div id="codeWeaponRow" class="row hidden">
+              <select id="codeWeaponId" style="flex:1;">
+                <option value="sunblade">★ RARE: Sunblade (Sword)</option>
+                <option value="titan_axe">★ RARE: Titan Waraxe (Battle Axe)</option>
+                <option value="dragon_lance">★ RARE: Dragon Lance (Spear)</option>
+                <option value="storm_bow">★ RARE: Storm Longbow (Bow)</option>
+                <option value="venom_dagger">★ RARE: Venom Fang (Dagger)</option>
+                <option value="kunai">★ RARE: Shadow Kunai (Knife)</option>
+                <option value="sword">Knight Sword</option>
+                <option value="axe">Battle Axe</option>
+                <option value="spear">Iron Spear</option>
+                <option value="bow">Hunter Bow</option>
+                <option value="dagger">Twin Dagger</option>
+                <option value="knife">Steel Knife</option>
+              </select>
+              <select id="codeWeaponLvl">
+                <option value="1">Lv 1 Base</option>
+                <option value="2">Lv 2 Cyan</option>
+                <option value="3">Lv 3 Emerald</option>
+                <option value="4" selected>Lv 4 Gold</option>
+                <option value="5">Lv 5 Violet</option>
+                <option value="6">Lv 6 Mythic</option>
+              </select>
             </div>
             <input id="codeNote" maxlength="80" placeholder="Code label (e.g. Promo Reward)" value="Owner Gift Code" />
             <button type="submit" class="cyan">GENERATE ONE-TIME CODE</button>
@@ -175,6 +204,59 @@
             <button id="copyLatestCodeBtn" type="button" class="primary sm">COPY CODE</button>
           </div>
         </div>
+      </div>
+
+      <!-- 3. SEND RARE ITEM / LUCKY DROP MYSTERY BOX TO PLAYER -->
+      <div class="box" style="border-color:#c084fc;">
+        <h2 style="color:#e879f9;">3. Send Rare Item / Lucky Drop Mystery Box to Player</h2>
+        <p class="sub" style="margin-bottom:10px;">
+          Gift rare Boss Weapons (with Glow Lv 1–6), a <b>🎲 Lucky Drop Mystery Box</b> (random Rare Boss Weapon Lv 3–6 + bonus coins!), Elemental Arrows, or 3D Armor Glow straight into a player's 15-slot Bag!
+        </p>
+        <form id="itemForm" class="row" style="align-items:stretch;">
+          <input id="itemPlayerId" placeholder="Player ID (e.g. SKY-2LZXY6)" style="min-width:175px;" required />
+          <select id="itemKind" style="min-width:210px;">
+            <option value="lucky_drop">🎲 Lucky Drop Mystery Box (Rare Roll!)</option>
+            <option value="weapon">⚔️ Rare / Boss Weapon Gift</option>
+            <option value="arrow">⚡ Elemental Arrows Unlock</option>
+            <option value="armor">🛡️ 3D Armor Glow Upgrade</option>
+          </select>
+          <select id="itemWeaponId" class="hidden" style="min-width:200px;">
+            <option value="sunblade">★ RARE: Sunblade (Sword)</option>
+            <option value="titan_axe">★ RARE: Titan Waraxe (Battle Axe)</option>
+            <option value="dragon_lance">★ RARE: Dragon Lance (Spear)</option>
+            <option value="storm_bow">★ RARE: Storm Longbow (Bow)</option>
+            <option value="venom_dagger">★ RARE: Venom Fang (Dagger)</option>
+            <option value="kunai">★ RARE: Shadow Kunai (Knife)</option>
+            <option value="sword">Knight Sword</option>
+            <option value="axe">Battle Axe</option>
+            <option value="spear">Iron Spear</option>
+            <option value="bow">Hunter Bow</option>
+            <option value="dagger">Twin Dagger</option>
+            <option value="knife">Steel Knife</option>
+          </select>
+          <select id="itemWeaponLvl" class="hidden">
+            <option value="1">Lv 1 Base</option>
+            <option value="2">Lv 2 Cyan</option>
+            <option value="3">Lv 3 Emerald</option>
+            <option value="4">Lv 4 Gold</option>
+            <option value="5">Lv 5 Violet</option>
+            <option value="6" selected>Lv 6 Mythic</option>
+          </select>
+          <select id="itemArrowId" class="hidden">
+            <option value="iron">Iron Arrows (+10 DMG)</option>
+            <option value="fire">Flame Arrows (+22 DMG)</option>
+            <option value="lightning" selected>Lightning Arrows (+38 DMG)</option>
+          </select>
+          <select id="itemArmorLvl" class="hidden">
+            <option value="2">Armor Lv 2 Cyan</option>
+            <option value="3">Armor Lv 3 Emerald</option>
+            <option value="4">Armor Lv 4 Gold</option>
+            <option value="5">Armor Lv 5 Violet</option>
+            <option value="6" selected>Armor Lv 6 Mythic</option>
+          </select>
+          <input id="itemNote" maxlength="80" placeholder="Note (e.g. Lucky Drop!)" value="Owner Lucky Drop" style="flex:1;min-width:150px;" />
+          <button type="submit" class="primary" style="background:#c084fc;border-color:#f0abfc;color:#0f172a;">SEND RARE GIFT / LUCKY DROP</button>
+        </form>
       </div>
 
       <!-- REGISTERED PLAYERS TABLE -->
@@ -336,9 +418,31 @@
 
         renderPlayers();
 
+        const WPN_LABELS = {
+          knife: 'Steel Knife', kunai: 'Shadow Kunai', dagger: 'Twin Dagger', venom_dagger: 'Venom Fang',
+          bow: 'Hunter Bow', storm_bow: 'Storm Longbow', spear: 'Iron Spear', dragon_lance: 'Dragon Lance',
+          sword: 'Knight Sword', sunblade: 'Sunblade', axe: 'Battle Axe', titan_axe: 'Titan Waraxe',
+        };
+        const fmtGiftReward = (g) => {
+          const parts = [];
+          if (g.kind === 'lucky_drop') parts.push(`🎲 ${WPN_LABELS[g.weaponId] || g.weaponId} Lv${g.weaponLevel}`);
+          else if (g.kind === 'weapon' && g.weaponId) parts.push(`⚔️ ${WPN_LABELS[g.weaponId] || g.weaponId} Lv${g.weaponLevel || 1}`);
+          else if (g.kind === 'arrow' && g.arrowId) parts.push(`⚡ ${g.arrowId.toUpperCase()} ARROWS`);
+          else if (g.kind === 'armor' && g.armorLevel) parts.push(`🛡️ ARMOR Lv${g.armorLevel}`);
+          if (Number(g.amount) > 0) parts.push(`+${Number(g.amount).toLocaleString()} CR`);
+          return parts.join(' + ') || 'Gift';
+        };
+        const fmtCodeReward = (c) => {
+          const parts = [];
+          if (Number(c.amount) > 0) parts.push(`+${Number(c.amount).toLocaleString()} CR`);
+          if (c.bonusKind === 'lucky_drop') parts.push('🎲 Lucky Drop');
+          else if (c.bonusKind === 'weapon' && c.weaponId) parts.push(`⚔️ ${WPN_LABELS[c.weaponId] || c.weaponId} Lv${c.weaponLevel || 4}`);
+          return parts.join(' + ') || 'Reward';
+        };
+
         const gtb = document.getElementById('giftsTbody');
         gtb.innerHTML = gifts.length
-          ? gifts.map((g) => `<tr><td><b style="color:#38bdf8;">${esc(g.playerId)}</b></td><td style="color:#facc15;font-weight:800;">+${Number(g.amount).toLocaleString()}</td><td>${esc(g.note)}</td><td>${fmtTime(g.sentAt)}</td></tr>`).join('')
+          ? gifts.map((g) => `<tr><td><b style="color:#38bdf8;">${esc(g.playerId)}</b></td><td style="color:#facc15;font-weight:800;">${esc(fmtGiftReward(g))}</td><td>${esc(g.note)}</td><td>${fmtTime(g.sentAt)}</td></tr>`).join('')
           : '<tr><td colspan="4" style="color:#94a3b8;">All sent gifts have been delivered!</td></tr>';
 
         const ctb = document.getElementById('codesTbody');
@@ -346,7 +450,7 @@
           ? codes.map((c) => `
               <tr>
                 <td><b>${esc(c.code)}</b></td>
-                <td style="color:#facc15;font-weight:800;">+${Number(c.amount).toLocaleString()}</td>
+                <td style="color:#facc15;font-weight:800;">${esc(fmtCodeReward(c))}</td>
                 <td>${c.used ? `<span class="pill red">USED by ${esc(c.usedBy || '')}</span>` : '<span class="pill green">UNUSED</span>'}</td>
                 <td>
                   ${!c.used ? `<button type="button" class="sm" data-copy-code="${esc(c.code)}">COPY</button> <button type="button" class="danger sm" data-del-code="${esc(c.code)}">DEL</button>` : '<span style="opacity:.5;">—</span>'}
@@ -421,16 +525,67 @@
     });
 
     let lastCreatedCode = '';
+    const codeBonusKindEl = document.getElementById('codeBonusKind');
+    const codeWeaponRow = document.getElementById('codeWeaponRow');
+    codeBonusKindEl.addEventListener('change', () => {
+      codeWeaponRow.classList.toggle('hidden', codeBonusKindEl.value !== 'weapon');
+    });
+
     document.getElementById('codeForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const amount = Number(document.getElementById('codeAmount').value);
+      const amount = Number(document.getElementById('codeAmount').value) || 0;
+      const bonusKind = codeBonusKindEl.value;
+      const weaponId = document.getElementById('codeWeaponId').value;
+      const weaponLevel = Number(document.getElementById('codeWeaponLvl').value) || 4;
       const note = document.getElementById('codeNote').value.trim();
       try {
-        const res = await callAdmin({ action: 'create_code', amount, note });
+        const res = await callAdmin({ action: 'create_code', amount, bonusKind, weaponId, weaponLevel, note });
         lastCreatedCode = res.codeEntry.code;
-        document.getElementById('latestCodeText').textContent = `NEW CODE: ${lastCreatedCode} (+${amount.toLocaleString()} CR)`;
+        const extraTxt = bonusKind === 'lucky_drop' ? ' + 🎲 Lucky Drop' : (bonusKind === 'weapon' ? ` + ⚔️ ${weaponId} Lv${weaponLevel}` : '');
+        document.getElementById('latestCodeText').textContent = `NEW CODE: ${lastCreatedCode} (${amount > 0 ? '+' + amount.toLocaleString() + ' CR' : ''}${extraTxt})`;
         document.getElementById('latestCodeBox').classList.remove('hidden');
-        showBoxMsg(globalMsg, `Created one-time code ${lastCreatedCode} for +${amount.toLocaleString()} Credits!`, 'ok');
+        showBoxMsg(globalMsg, `Created one-time code ${lastCreatedCode}!`, 'ok');
+        await loadDashboard();
+      } catch (err) {
+        showBoxMsg(globalMsg, err.message, 'err');
+      }
+    });
+
+    // Rare Item / Lucky Drop Mystery Box Sender
+    const itemKindEl = document.getElementById('itemKind');
+    const syncItemInputs = () => {
+      const k = itemKindEl.value;
+      document.getElementById('itemWeaponId').classList.toggle('hidden', k !== 'weapon');
+      document.getElementById('itemWeaponLvl').classList.toggle('hidden', k !== 'weapon');
+      document.getElementById('itemArrowId').classList.toggle('hidden', k !== 'arrow');
+      document.getElementById('itemArmorLvl').classList.toggle('hidden', k !== 'armor');
+    };
+    itemKindEl.addEventListener('change', syncItemInputs);
+    syncItemInputs();
+
+    document.getElementById('itemForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const playerId = document.getElementById('itemPlayerId').value.trim().toUpperCase();
+      const kind = itemKindEl.value;
+      const payload = {
+        action: 'send_item',
+        playerId,
+        kind,
+        weaponId: document.getElementById('itemWeaponId').value,
+        weaponLevel: Number(document.getElementById('itemWeaponLvl').value),
+        arrowId: document.getElementById('itemArrowId').value,
+        armorLevel: Number(document.getElementById('itemArmorLvl').value),
+        note: document.getElementById('itemNote').value.trim(),
+      };
+      try {
+        const res = await callAdmin(payload);
+        const g = res.gift;
+        const summary = kind === 'lucky_drop'
+          ? `🎲 Lucky Drop (${g.weaponId} Lv${g.weaponLevel} + ${g.amount} CR)`
+          : kind === 'weapon' ? `⚔️ ${g.weaponId} Lv${g.weaponLevel}`
+          : kind === 'arrow' ? `⚡ ${g.arrowId} Arrows`
+          : `🛡️ Armor Lv${g.armorLevel}`;
+        showBoxMsg(globalMsg, `Sent ${summary} to ${playerId}! They will receive it on their next mailbox sync.`, 'ok');
         await loadDashboard();
       } catch (err) {
         showBoxMsg(globalMsg, err.message, 'err');
@@ -446,6 +601,7 @@
       const pick = e.target.closest('[data-pick-id]');
       if (pick) {
         document.getElementById('sendPlayerId').value = pick.dataset.pickId;
+        document.getElementById('itemPlayerId').value = pick.dataset.pickId;
         document.getElementById('sendAmount').focus();
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
